@@ -423,15 +423,31 @@ fn init_logger(args: &VerificationArgs) {
 // For release versions of Kani, we use a version of cargo that's in the toolchain that's been symlinked during `cargo-kani` setup. This will allow
 // Kani to remove the runtime dependency on rustup later on.
 pub fn setup_cargo_command() -> Result<Command> {
+    setup_cargo_command_inner(false)
+}
+
+pub fn setup_cargo_command_inner(sample: bool) -> Result<Command> {
     let install_type = InstallType::new()?;
 
     let cmd = match install_type {
         InstallType::DevRepo(_) => {
-            let mut cmd = Command::new("cargo");
-            cmd.arg(self::toolchain_shorthand());
-            cmd
+            if sample && true {
+                let mut cmd = Command::new("samply");
+                cmd.arg("record");
+                cmd.arg("-r").arg("8000"); // add the sampling rate in Hz
+                // can also set output location here...
+                // cmd.arg("-o").arg(format!("{}.json.gz", base_folder().unwrap().to_str().unwrap()));
+                cmd.arg("cargo"); // add normal cargo command
+                cmd.arg(self::toolchain_shorthand());
+                cmd
+            } else {
+                let mut cmd = Command::new("cargo");
+                cmd.arg(self::toolchain_shorthand());
+                cmd
+            }
         }
         InstallType::Release(kani_dir) => {
+            // panic!("not sampling for release yet...");
             let cargo_path = kani_dir.join("toolchain").join("bin").join("cargo");
             Command::new(cargo_path)
         }

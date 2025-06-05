@@ -62,6 +62,7 @@ fn main() {
     let (kani_compiler, rustc_args) = is_kani_compiler(env::args().collect());
 
     // Configure and run compiler.
+
     if kani_compiler {
         kani_compiler::run(rustc_args);
     } else {

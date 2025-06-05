@@ -178,6 +178,7 @@ impl LlbcCodegenBackend {
             // `crate_data` is set by our callbacks when there is no fatal error.
             let mut pb = llbc_file.to_path_buf();
             pb.set_extension("llbc");
+            println!("writing to file");
             println!("Writing LLBC file to {}", pb.display());
             if let Err(()) = crate_data.serialize_to_file(&pb) {
                 tcx.sess.dcx().err("Failed to write LLBC file");
@@ -208,6 +209,8 @@ impl CodegenBackend for LlbcCodegenBackend {
         rustc_metadata: EncodedMetadata,
         _need_metadata_module: bool,
     ) -> Box<dyn Any> {
+        // codegen_the_damn_crate();
+
         let ret_val = rustc_internal::run(tcx, || {
             // Queries shouldn't change today once codegen starts.
             let queries = self.queries.lock().unwrap().clone();

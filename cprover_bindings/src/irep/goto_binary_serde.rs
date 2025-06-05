@@ -95,6 +95,7 @@ use std::path::Path;
 /// - src/util/irep_hash_container.h
 /// - src/util/irep_hash.h
 pub fn write_goto_binary_file(filename: &Path, source: &crate::goto_program::SymbolTable) {
+    println!("writing binary file");
     let out_file = File::create(filename).unwrap();
     let mut writer = BufWriter::new(out_file);
     let mut serializer = GotoBinarySerializer::new(&mut writer);
