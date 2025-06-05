@@ -78,9 +78,9 @@
 //! Dually to the serializer, it will only attempt to decode the contents of an
 //! object from the byte stream on the first occurrence.
 
+use rustc_hash::FxHashMap;
 use crate::irep::{Irep, IrepId, Symbol, SymbolTable};
 use crate::{InternString, InternedString};
-use std::collections::HashMap;
 use std::fs::File;
 use std::hash::Hash;
 use std::io::{self, BufReader};
@@ -202,13 +202,13 @@ impl IrepNumberingInv {
 /// A numbering of [InternedString], [IrepId] and [Irep] based on their contents.
 struct IrepNumbering {
     /// Map from [InternedString] to their unique numbers.
-    string_cache: HashMap<InternedString, usize>,
+    string_cache: FxHashMap<InternedString, usize>,
 
     /// Inverse string cache.
     inv_string_cache: Vec<NumberedString>,
 
     /// Map from [IrepKey] to their unique numbers.
-    cache: HashMap<IrepKey, usize>,
+    cache: FxHashMap<IrepKey, usize>,
 
     /// Inverse cache, allows to get a NumberedIrep from its unique number.
     inv_cache: IrepNumberingInv,
@@ -217,9 +217,9 @@ struct IrepNumbering {
 impl IrepNumbering {
     fn new() -> Self {
         IrepNumbering {
-            string_cache: HashMap::new(),
+            string_cache: FxHashMap::default(),
             inv_string_cache: Vec::new(),
-            cache: HashMap::new(),
+            cache: FxHashMap::default(),
             inv_cache: IrepNumberingInv::new(),
         }
     }
@@ -989,24 +989,26 @@ mod sharing_stats {
 
     impl DynamicUsage for IrepNumbering {
         fn dynamic_usage(&self) -> usize {
-            std::mem::size_of::<Self>()
-                + self.string_cache.dynamic_usage()
-                + self.inv_string_cache.dynamic_usage()
-                + self.cache.dynamic_usage()
-                + self.inv_cache.dynamic_usage()
+            todo!()
+            // std::mem::size_of::<Self>()
+            //     + self.string_cache.dynamic_usage()
+            //     + self.inv_string_cache.dynamic_usage()
+            //     + self.cache.dynamic_usage()
+            //     + self.inv_cache.dynamic_usage()
         }
 
         fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-            let s = std::mem::size_of::<Self>();
-            let (l1, u1) = self.string_cache.dynamic_usage_bounds();
-            let (l2, u2) = self.inv_string_cache.dynamic_usage_bounds();
-            let (l3, u3) = self.cache.dynamic_usage_bounds();
-            let (l4, u4) = self.inv_cache.dynamic_usage_bounds();
-            let l = l1 + l2 + l3 + l4 + s;
-            let u = u1.and_then(|u1| {
-                u2.and_then(|u2| u3.and_then(|u3| u4.map(|u4| u1 + u2 + u3 + u4 + s)))
-            });
-            (l, u)
+            todo!()
+            // let s = std::mem::size_of::<Self>();
+            // let (l1, u1) = self.string_cache.dynamic_usage_bounds();
+            // let (l2, u2) = self.inv_string_cache.dynamic_usage_bounds();
+            // let (l3, u3) = self.cache.dynamic_usage_bounds();
+            // let (l4, u4) = self.inv_cache.dynamic_usage_bounds();
+            // let l = l1 + l2 + l3 + l4 + s;
+            // let u = u1.and_then(|u1| {
+            //     u2.and_then(|u2| u3.and_then(|u3| u4.map(|u4| u1 + u2 + u3 + u4 + s)))
+            // });
+            // (l, u)
         }
     }
 
