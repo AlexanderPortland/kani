@@ -78,9 +78,12 @@
 //! Dually to the serializer, it will only attempt to decode the contents of an
 //! object from the byte stream on the first occurrence.
 
-use rustc_hash::FxHashMap;
 use crate::irep::{Irep, IrepId, Symbol, SymbolTable};
 use crate::{InternString, InternedString};
+#[cfg(not(test))]
+use rustc_hash::FxHashMap;
+#[cfg(test)]
+use std::collections::HashMap;
 use std::fs::File;
 use std::hash::Hash;
 use std::io::{self, BufReader};
@@ -199,6 +202,7 @@ impl IrepNumberingInv {
     }
 }
 
+#[cfg(not(test))]
 /// A numbering of [InternedString], [IrepId] and [Irep] based on their contents.
 struct IrepNumbering {
     /// Map from [InternedString] to their unique numbers.
@@ -214,6 +218,35 @@ struct IrepNumbering {
     inv_cache: IrepNumberingInv,
 }
 
+#[cfg(test)]
+/// A numbering of [InternedString], [IrepId] and [Irep] based on their contents.
+struct IrepNumbering {
+    /// Map from [InternedString] to their unique numbers.
+    string_cache: HashMap<InternedString, usize>,
+
+    /// Inverse string cache.
+    inv_string_cache: Vec<NumberedString>,
+
+    /// Map from [IrepKey] to their unique numbers.
+    cache: HashMap<IrepKey, usize>,
+
+    /// Inverse cache, allows to get a NumberedIrep from its unique number.
+    inv_cache: IrepNumberingInv,
+}
+
+#[cfg(test)]
+impl IrepNumbering {
+    fn new() -> Self {
+        IrepNumbering {
+            string_cache: HashMap::default(),
+            inv_string_cache: Vec::new(),
+            cache: HashMap::default(),
+            inv_cache: IrepNumberingInv::new(),
+        }
+    }
+}
+
+#[cfg(not(test))]
 impl IrepNumbering {
     fn new() -> Self {
         IrepNumbering {
@@ -223,7 +256,9 @@ impl IrepNumbering {
             inv_cache: IrepNumberingInv::new(),
         }
     }
+}
 
+impl IrepNumbering {
     /// Returns a [NumberedString] from its number if it exists, None otherwise.
     fn numbered_string_from_number(&mut self, string_number: usize) -> Option<NumberedString> {
         self.inv_string_cache.get(string_number).copied()
@@ -989,26 +1024,24 @@ mod sharing_stats {
 
     impl DynamicUsage for IrepNumbering {
         fn dynamic_usage(&self) -> usize {
-            todo!()
-            // std::mem::size_of::<Self>()
-            //     + self.string_cache.dynamic_usage()
-            //     + self.inv_string_cache.dynamic_usage()
-            //     + self.cache.dynamic_usage()
-            //     + self.inv_cache.dynamic_usage()
+            std::mem::size_of::<Self>()
+                + self.string_cache.dynamic_usage()
+                + self.inv_string_cache.dynamic_usage()
+                + self.cache.dynamic_usage()
+                + self.inv_cache.dynamic_usage()
         }
 
         fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
-            todo!()
-            // let s = std::mem::size_of::<Self>();
-            // let (l1, u1) = self.string_cache.dynamic_usage_bounds();
-            // let (l2, u2) = self.inv_string_cache.dynamic_usage_bounds();
-            // let (l3, u3) = self.cache.dynamic_usage_bounds();
-            // let (l4, u4) = self.inv_cache.dynamic_usage_bounds();
-            // let l = l1 + l2 + l3 + l4 + s;
-            // let u = u1.and_then(|u1| {
-            //     u2.and_then(|u2| u3.and_then(|u3| u4.map(|u4| u1 + u2 + u3 + u4 + s)))
-            // });
-            // (l, u)
+            let s = std::mem::size_of::<Self>();
+            let (l1, u1) = self.string_cache.dynamic_usage_bounds();
+            let (l2, u2) = self.inv_string_cache.dynamic_usage_bounds();
+            let (l3, u3) = self.cache.dynamic_usage_bounds();
+            let (l4, u4) = self.inv_cache.dynamic_usage_bounds();
+            let l = l1 + l2 + l3 + l4 + s;
+            let u = u1.and_then(|u1| {
+                u2.and_then(|u2| u3.and_then(|u3| u4.map(|u4| u1 + u2 + u3 + u4 + s)))
+            });
+            (l, u)
         }
     }
 
