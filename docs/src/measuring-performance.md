@@ -9,3 +9,4 @@
 - since samply randomly polls the 
 - even if you halt the program using ^C or similar, the file should still be outputted with info from up to that point.
 - profiling the compiler affects what the driver does, so it can make sense to run it by itself using `FLAMEGRAPH=driver` rather than `FLAMEGRAPH=all`
+- compile w/ the `profiling` profile to ensure symbol names, lines numbers and other debug info are included while still compiling w/ release mode optimizations
