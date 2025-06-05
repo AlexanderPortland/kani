@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 set -eu
+set -x
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 REPO_DIR="$(dirname $SCRIPT_DIR)"
@@ -18,4 +19,9 @@ then
     exit 1
 fi
 
-exec -a cargo-kani "${KANI_DRIVER}" "$@"
+if [ ! "${DRIVER_FG+set}" ]; then
+    exec -a cargo-kani "${KANI_DRIVER}" "$@"
+else
+    echo driverfg
+    exec -a cargo-kani samply record -r 8000 -o "${DRIVER_FG}.json.gz" --save-only "${KANI_DRIVER}" "$@"
+fi
