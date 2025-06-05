@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: Apache-2.0 OR MIT
 
 set -eu
-set -x
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 REPO_DIR="$(dirname $SCRIPT_DIR)"
@@ -19,9 +18,18 @@ then
     exit 1
 fi
 
-if [ ! "${DRIVER_FG+set}" ]; then
+rm -rf flamegraphs
+
+FLAMEGRAPH_DRIVER=0
+FLAMEGRAPH_DIR="flamegraphs"
+
+if [[ ( -n "${FLAMEGRAPH}" ) && ( "${FLAMEGRAPH}" == "driver" || "${FLAMEGRAPH}" == "all" ) ]]; then
+    FLAMEGRAPH_DRIVER=1
+fi
+
+if (( FLAMEGRAPH_DRIVER == 0 )); then 
     exec -a cargo-kani "${KANI_DRIVER}" "$@"
-else
-    echo driverfg
-    exec -a cargo-kani samply record -r 8000 -o "${DRIVER_FG}.json.gz" --save-only "${KANI_DRIVER}" "$@"
+else 
+    mkdir -p "${FLAMEGRAPH_DIR}"
+    exec -a cargo-kani samply record -r 8000 -o "${FLAMEGRAPH_DIR}/driver.json.gz" --save-only "${KANI_DRIVER}" "$@"
 fi

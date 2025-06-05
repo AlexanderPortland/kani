@@ -423,26 +423,32 @@ fn init_logger(args: &VerificationArgs) {
 // For release versions of Kani, we use a version of cargo that's in the toolchain that's been symlinked during `cargo-kani` setup. This will allow
 // Kani to remove the runtime dependency on rustup later on.
 pub fn setup_cargo_command() -> Result<Command> {
-    setup_cargo_command_inner(false)
+    setup_cargo_command_inner(None)
 }
 
-pub fn setup_cargo_command_inner(sample: bool) -> Result<Command> {
+pub fn setup_cargo_command_inner(sample_out_path: Option<String>) -> Result<Command> {
     let install_type = InstallType::new()?;
 
     let cmd = match install_type {
         InstallType::DevRepo(_) => {
+            let dir = "flamegraphs";
             // TODO: these aren't really flamegraphs yet... rename
-            let dir_name = "flamegraphs";
-            // std::fs::remove_dir_all(dir_name);
-            let compiler_out = std::env::var("COMPILER_FG");
+            let flamegraph_compiler = matches!(
+                std::env::var("FLAMEGRAPH"),
+                Ok(ref s) if s == "all" || s == "compiler"
+            );
+
             // TODO: make the name be the crate being compiled, and the directory be what we supply...
-            if sample && let Ok(compiler_out) = compiler_out {
+            if let Some(compiler_out) = sample_out_path
+                && flamegraph_compiler
+            {
+                let _ = std::fs::create_dir(dir);
                 // std::fs::create_dir(dir_name).unwrap();
                 let mut cmd = Command::new("samply");
                 cmd.arg("record");
                 cmd.arg("-r").arg("8000"); // add the sampling rate in Hz
                 // can also set output location here...
-                cmd.arg("-o").arg(format!("{compiler_out}.json.gz",)); // set the output file
+                cmd.arg("-o").arg(format!("{dir}/compiler-{compiler_out}.json.gz",)); // set the output file
                 cmd.arg("--save-only"); // just save the output and don't open the interactive UI.
                 cmd.arg("cargo"); // add normal cargo command
                 cmd.arg(self::toolchain_shorthand());

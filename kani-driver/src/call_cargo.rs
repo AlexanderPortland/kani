@@ -205,7 +205,8 @@ crate-type = ["lib"]
         let mut failed_targets = vec![];
         for package in packages {
             for verification_target in package_targets(&self.args, package) {
-                let mut cmd = setup_cargo_command_inner(true)?;
+                let mut cmd =
+                    setup_cargo_command_inner(Some(verification_target.target().name.clone()))?;
                 cmd.args(&cargo_args)
                     .args(vec!["-p", &package.id.to_string()])
                     .args(verification_target.to_args())
