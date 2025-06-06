@@ -364,7 +364,9 @@ crate-type = ["lib"]
                     && t1.doc == t2.doc)
         }
 
+        let start = std::time::Instant::now();
         let artifacts = self.run_build(cargo_cmd)?;
+        println!("BUILT IN {:?}", start.elapsed());
         debug!(?artifacts, "run_build_target");
 
         // We generate kani specific artifacts only for the build target. The build target is

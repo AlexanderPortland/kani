@@ -501,12 +501,19 @@ impl ToIrep for StmtBody {
             StmtBody::Assume { cond } => code_irep(IrepId::Assume, vec![cond.to_irep(mm)]),
             StmtBody::AtomicBlock(stmts) => {
                 let mut irep_stmts = vec![code_irep(IrepId::AtomicBegin, vec![])];
-                irep_stmts.append(&mut stmts.iter().map(|x| x.to_irep(mm)).collect());
+                for x in stmts {
+                    irep_stmts.push(x.to_irep(mm));
+                }
+                // irep_stmts.append(&mut stmts.iter().map(|x| x.to_irep(mm)).collect());
                 irep_stmts.push(code_irep(IrepId::AtomicEnd, vec![]));
                 code_irep(IrepId::Block, irep_stmts)
             }
             StmtBody::Block(stmts) => {
-                code_irep(IrepId::Block, stmts.iter().map(|x| x.to_irep(mm)).collect())
+                let mut sub = vec![];
+                for s in stmts {
+                    sub.push(s.to_irep(mm));
+                }
+                code_irep(IrepId::Block, sub)
             }
             StmtBody::Break => code_irep(IrepId::Break, vec![]),
             StmtBody::Continue => code_irep(IrepId::Continue, vec![]),
@@ -568,7 +575,12 @@ impl ToIrep for StmtBody {
             }
             StmtBody::Skip => code_irep(IrepId::Skip, vec![]),
             StmtBody::Switch { control, cases, default } => {
-                let mut switch_arms: Vec<Irep> = cases.iter().map(|x| x.to_irep(mm)).collect();
+                let mut switch_arms: Vec<Irep> = vec![]; 
+                for c in cases {
+                    switch_arms.push(c.to_irep(mm));
+                }
+                
+                // cases.iter().map(|x| x.to_irep(mm)).collect();
                 if default.is_some() {
                     switch_arms.push(switch_default_irep(default.as_ref().unwrap(), mm));
                 }
