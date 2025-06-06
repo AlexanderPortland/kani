@@ -248,7 +248,13 @@ impl IrepNumbering {
     /// Turns a [IrepId] to a [NumberedString]. The [IrepId] gets the number of its
     /// string representation.
     fn number_irep_id(&mut self, irep_id: &IrepId) -> NumberedString {
-        self.number_string(&irep_id.to_string().intern())
+        // let wrapper = super::irep_id::SillyWrapper(irep_id);
+        let string: InternedString = match irep_id.to_string_maybe_ref() {
+            Ok(owned) => owned.into(),
+            Err(static_str) => static_str.into(),
+        };
+        self.number_string(&string)
+        // self.number_string(&irep_id.to_string().intern())
     }
 
     /// Turns an [Irep] into a [NumberedIrep]. The [Irep] is recursively traversed
@@ -257,12 +263,21 @@ impl IrepNumbering {
     fn number_irep(&mut self, irep: &Irep) -> NumberedIrep {
         // build the key
         let id = self.number_irep_id(&irep.id).number;
-        let sub: Vec<usize> = irep.sub.iter().map(|sub| self.number_irep(sub).number).collect();
-        let named_sub: Vec<(usize, usize)> = irep
-            .named_sub
-            .iter()
-            .map(|(key, value)| (self.number_irep_id(key).number, self.number_irep(value).number))
-            .collect();
+        // let mutsub: Vec<usize> = irep.sub.iter().map(|sub| self.number_irep(sub).number).collect();
+        let mut sub = Vec::with_capacity(irep.sub.len());
+        for value in &irep.sub {
+            sub.push(self.number_irep(value).number);
+        }
+
+        let mut named_sub = Vec::with_capacity(irep.named_sub.len());
+        for (key, value) in &irep.named_sub {
+            named_sub.push((self.number_irep_id(key).number, self.number_irep(value).number))
+        }
+        // let named_sub: Vec<(usize, usize)> = irep
+        //     .named_sub
+        //     .iter()
+        //     .map(|(key, value)| (self.number_irep_id(key).number, self.number_irep(value).number))
+        //     .collect();
         let key = IrepKey::new(id, &sub, &named_sub);
         self.get_or_insert(&key)
     }
