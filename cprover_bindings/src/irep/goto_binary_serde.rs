@@ -80,6 +80,7 @@
 
 use crate::irep::{Irep, IrepId, Symbol, SymbolTable};
 use crate::{InternString, InternedString};
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::File;
 use std::hash::Hash;
@@ -155,16 +156,20 @@ impl IrepKey {
     /// named_sub[named_sub.len()-1].0
     /// named_sub[named_sub.len()-1].1
     /// ```
-    fn new(id: usize, sub: &[usize], named_sub: &[(usize, usize)]) -> Self {
+    fn new(
+        id: usize,
+        sub: Box<impl ExactSizeIterator<Item = usize>>,
+        named_sub: Box<impl ExactSizeIterator<Item = (usize, usize)>>,
+    ) -> Self {
         let size = sub.len() + 2 * named_sub.len() + 3;
         let mut vec: Vec<usize> = Vec::with_capacity(size);
         vec.push(id);
         vec.push(sub.len());
-        vec.extend_from_slice(sub);
+        vec.extend(sub);
         vec.push(named_sub.len());
         for (k, v) in named_sub {
-            vec.push(*k);
-            vec.push(*v);
+            vec.push(k);
+            vec.push(v);
         }
         IrepKey { numbers: vec }
     }
@@ -202,105 +207,107 @@ impl IrepNumberingInv {
 /// A numbering of [InternedString], [IrepId] and [Irep] based on their contents.
 struct IrepNumbering {
     /// Map from [InternedString] to their unique numbers.
-    string_cache: HashMap<InternedString, usize>,
+    string_cache: RefCell<HashMap<InternedString, usize>>,
 
     /// Inverse string cache.
-    inv_string_cache: Vec<NumberedString>,
+    inv_string_cache: RefCell<Vec<NumberedString>>,
 
     /// Map from [IrepKey] to their unique numbers.
-    cache: HashMap<IrepKey, usize>,
+    cache: RefCell<HashMap<IrepKey, usize>>,
 
     /// Inverse cache, allows to get a NumberedIrep from its unique number.
-    inv_cache: IrepNumberingInv,
+    inv_cache: RefCell<IrepNumberingInv>,
 }
 
 impl IrepNumbering {
     fn new() -> Self {
         IrepNumbering {
-            string_cache: HashMap::new(),
-            inv_string_cache: Vec::new(),
-            cache: HashMap::new(),
-            inv_cache: IrepNumberingInv::new(),
+            string_cache: RefCell::new(HashMap::new()),
+            inv_string_cache: RefCell::new(Vec::new()),
+            cache: RefCell::new(HashMap::new()),
+            inv_cache: RefCell::new(IrepNumberingInv::new()),
         }
     }
 
     /// Returns a [NumberedString] from its number if it exists, None otherwise.
     fn numbered_string_from_number(&mut self, string_number: usize) -> Option<NumberedString> {
-        self.inv_string_cache.get(string_number).copied()
+        self.inv_string_cache.borrow_mut().get(string_number).copied()
     }
 
     /// Returns a [NumberedIrep] from its number if it exists, None otherwise.
     fn numbered_irep_from_number(&mut self, irep_number: usize) -> Option<NumberedIrep> {
-        self.inv_cache.numbered_irep_from_number(irep_number)
+        self.inv_cache.borrow_mut().numbered_irep_from_number(irep_number)
     }
 
     /// Turns a [InternedString] into a [NumberedString].
-    fn number_string(&mut self, string: &InternedString) -> NumberedString {
-        let len = self.string_cache.len();
-        let entry = self.string_cache.entry(*string);
+    fn number_string(&self, string: &InternedString) -> NumberedString {
+        let len = self.string_cache.borrow().len();
+        let mut string_cache_ref = self.string_cache.borrow_mut();
+        let entry = string_cache_ref.entry(*string);
         let number = *entry.or_insert_with(|| {
-            self.inv_string_cache.push(NumberedString { number: len, string: *string });
+            self.inv_string_cache
+                .borrow_mut()
+                .push(NumberedString { number: len, string: *string });
             len
         });
-        self.inv_string_cache[number]
+        self.inv_string_cache.borrow()[number]
     }
 
     /// Turns a [IrepId] to a [NumberedString]. The [IrepId] gets the number of its
     /// string representation.
-    fn number_irep_id(&mut self, irep_id: &IrepId) -> NumberedString {
+    fn number_irep_id(&self, irep_id: &IrepId) -> NumberedString {
         self.number_string(&irep_id.to_string().intern())
     }
 
     /// Turns an [Irep] into a [NumberedIrep]. The [Irep] is recursively traversed
     /// and numbered in a bottom-up fashion. Structurally identical [Irep]s
     /// result in the same [NumberedIrep].
-    fn number_irep(&mut self, irep: &Irep) -> NumberedIrep {
+    fn number_irep(&self, irep: &Irep) -> NumberedIrep {
         // build the key
         let id = self.number_irep_id(&irep.id).number;
-        let sub: Vec<usize> = irep.sub.iter().map(|sub| self.number_irep(sub).number).collect();
-        let named_sub: Vec<(usize, usize)> = irep
+        let sub = irep.sub.iter().map(|sub| self.number_irep(sub).number);
+        let named_sub = irep
             .named_sub
             .iter()
-            .map(|(key, value)| (self.number_irep_id(key).number, self.number_irep(value).number))
-            .collect();
-        let key = IrepKey::new(id, &sub, &named_sub);
+            .map(|(key, value)| (self.number_irep_id(key).number, self.number_irep(value).number));
+        let key = IrepKey::new(id, Box::new(sub), Box::new(named_sub));
         self.get_or_insert(&key)
     }
 
     /// Gets the existing [NumberedIrep] from the [IrepKey] or inserts a fresh
     /// one and returns it.
-    fn get_or_insert(&mut self, key: &IrepKey) -> NumberedIrep {
-        if let Some(number) = self.cache.get(key) {
+    fn get_or_insert(&self, key: &IrepKey) -> NumberedIrep {
+        if let Some(number) = self.cache.borrow().get(key) {
             // Return the NumberedIrep from the inverse cache
-            return self.inv_cache.index[*number];
+            return self.inv_cache.borrow().index[*number];
         }
         // This is where the key gets its unique number assigned.
-        let number = self.inv_cache.add_key(key);
-        self.cache.insert(key.clone(), number);
-        self.inv_cache.index[number]
+        let number = self.inv_cache.borrow_mut().add_key(key);
+        self.cache.borrow_mut().insert(key.clone(), number);
+        self.inv_cache.borrow().index[number]
     }
 
     /// Returns the unique number of the `id` field of the given [NumberedIrep].
     fn id(&self, numbered_irep: &NumberedIrep) -> NumberedString {
-        self.inv_string_cache[self.inv_cache.keys[numbered_irep.start_index]]
+        self.inv_string_cache.borrow()[self.inv_cache.borrow().keys[numbered_irep.start_index]]
     }
 
     /// Returns `#sub`, the number of `sub` [Irep]s of the given [NumberedIrep].
     /// It is found at `numbered_irep.start_index + 1` in the inverse cache.
     fn nof_sub(&self, numbered_irep: &NumberedIrep) -> usize {
-        self.inv_cache.keys[numbered_irep.start_index + 1]
+        self.inv_cache.borrow().keys[numbered_irep.start_index + 1]
     }
 
     /// Returns the [NumberedIrep] for the ith `sub` of the given [NumberedIrep].
     fn sub(&self, numbered_irep: &NumberedIrep, sub_idx: usize) -> NumberedIrep {
-        let sub_number = self.inv_cache.keys[numbered_irep.start_index + sub_idx + 2];
-        self.inv_cache.index[sub_number]
+        let sub_number = self.inv_cache.borrow().keys[numbered_irep.start_index + sub_idx + 2];
+        self.inv_cache.borrow().index[sub_number]
     }
 
     /// Returns `#named_sub`, the number of named subs of the given [NumberedIrep].
     /// It is found at `numbered_irep.start_index + #sub + 2` in the inverse cache.
     fn nof_named_sub(&self, numbered_irep: &NumberedIrep) -> usize {
-        self.inv_cache.keys[numbered_irep.start_index + self.nof_sub(numbered_irep) + 2]
+        self.inv_cache.borrow().keys[numbered_irep.start_index + self.nof_sub(numbered_irep) + 2]
     }
 
     /// Returns the pair of [NumberedString] and [NumberedIrep] for the named
@@ -313,8 +320,8 @@ impl IrepNumbering {
         let start_index =
             numbered_irep.start_index + self.nof_sub(numbered_irep) + 2 * named_sub_idx + 3;
         (
-            self.inv_string_cache[self.inv_cache.keys[start_index]],
-            self.inv_cache.index[self.inv_cache.keys[start_index + 1]],
+            self.inv_string_cache.borrow()[self.inv_cache.borrow().keys[start_index]],
+            self.inv_cache.borrow().index[self.inv_cache.borrow().keys[start_index + 1]],
         )
     }
 }
@@ -791,7 +798,11 @@ where
                     0 => {
                         // Reached the end of this irep
                         // Build the key
-                        let key = IrepKey::new(id, &sub, &named_sub);
+                        let key = IrepKey::new(
+                            id,
+                            Box::new(sub.into_iter()),
+                            Box::new(named_sub.into_iter()),
+                        );
 
                         // Insert key in the numbering
                         let numbered = self.numbering.get_or_insert(&key);
@@ -990,18 +1001,18 @@ mod sharing_stats {
     impl DynamicUsage for IrepNumbering {
         fn dynamic_usage(&self) -> usize {
             std::mem::size_of::<Self>()
-                + self.string_cache.dynamic_usage()
-                + self.inv_string_cache.dynamic_usage()
-                + self.cache.dynamic_usage()
-                + self.inv_cache.dynamic_usage()
+                + self.string_cache.borrow().dynamic_usage()
+                + self.inv_string_cache.borrow().dynamic_usage()
+                + self.cache.borrow().dynamic_usage()
+                + self.inv_cache.borrow().dynamic_usage()
         }
 
         fn dynamic_usage_bounds(&self) -> (usize, Option<usize>) {
             let s = std::mem::size_of::<Self>();
-            let (l1, u1) = self.string_cache.dynamic_usage_bounds();
-            let (l2, u2) = self.inv_string_cache.dynamic_usage_bounds();
-            let (l3, u3) = self.cache.dynamic_usage_bounds();
-            let (l4, u4) = self.inv_cache.dynamic_usage_bounds();
+            let (l1, u1) = self.string_cache.borrow().dynamic_usage_bounds();
+            let (l2, u2) = self.inv_string_cache.borrow().dynamic_usage_bounds();
+            let (l3, u3) = self.cache.borrow().dynamic_usage_bounds();
+            let (l4, u4) = self.inv_cache.borrow().dynamic_usage_bounds();
             let l = l1 + l2 + l3 + l4 + s;
             let u = u1.and_then(|u1| {
                 u2.and_then(|u2| u3.and_then(|u3| u4.map(|u4| u1 + u2 + u3 + u4 + s)))
@@ -1206,7 +1217,7 @@ mod tests {
     #[test]
     /// Create two structurally identical ireps and check that they get the same number.
     fn test_irep_numbering_eq() {
-        let mut numbering = IrepNumbering::new();
+        let numbering = IrepNumbering::new();
         let identifiers = vec![
             "foo", "bar", "baz", "zab", "rab", "oof", "foo", "bar", "baz", "zab", "rab", "oof",
         ];
@@ -1218,7 +1229,7 @@ mod tests {
     #[test]
     /// Create two ireps with different named subs and check that they get different numbers.
     fn test_irep_numbering_ne_named_sub() {
-        let mut numbering = IrepNumbering::new();
+        let numbering = IrepNumbering::new();
 
         let identifiers1 = vec![
             "foo", "bar", "baz", "zab", "rab", "oof", "foo", "bar", "baz", "zab", "rab", "oof",
@@ -1235,7 +1246,7 @@ mod tests {
     #[test]
     /// Create two ireps with different ids and check that they get different numbers.
     fn test_irep_numbering_ne_id() {
-        let mut numbering = IrepNumbering::new();
+        let numbering = IrepNumbering::new();
 
         let identifiers = vec![
             "foo", "bar", "baz", "zab", "rab", "oof", "foo", "bar", "baz", "zab", "rab", "oof",
