@@ -31,11 +31,14 @@ path = "src/bin/cargo_kani.rs"
 
 [profile.release]
 strip = "debuginfo"
+codegen-units = 1
+lto = "fat"
 
 [profile.profiling]
 inherits = "release"
 debug = true
 strip = "none"
+lto = "off"
 
 # Below is the workspace (vs above is "kani-verifier" crate) config:
 
