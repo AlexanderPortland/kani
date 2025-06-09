@@ -283,7 +283,11 @@ impl IrepNumbering {
     /// Turns a [IrepId] to a [NumberedString]. The [IrepId] gets the number of its
     /// string representation.
     fn number_irep_id(&mut self, irep_id: &IrepId) -> NumberedString {
-        self.number_string(&irep_id.to_string_cow().intern())
+        if let IrepId::FreeformString(already_interned) = irep_id {
+            self.number_string(already_interned)
+        } else {
+            self.number_string(&irep_id.to_string_cow().intern())
+        }
     }
 
     /// Turns an [Irep] into a [NumberedIrep]. The [Irep] is recursively traversed
