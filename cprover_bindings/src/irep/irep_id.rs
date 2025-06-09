@@ -4,6 +4,8 @@
 //!
 //! This file contains [IrepId] which is the id's used in CBMC.
 //! c.f. CBMC source code [src/util/irep_ids.def]
+use std::borrow::Cow;
+
 use crate::cbmc_string::InternedString;
 use crate::utils::NumUtils;
 use num::bigint::{BigInt, BigUint, Sign};
@@ -1704,23 +1706,23 @@ const IREPID_NAMES: [Option<&'static str>; 820] = [
 #[allow(clippy::to_string_trait_impl)]
 impl ToString for IrepId {
     fn to_string(&self) -> String {
-        match self.to_string_maybe_ref() {
-            Ok(s) => s,
-            Err(r) => r.to_owned(),
-        }
+        self.to_string_cow().into_owned()
     }
 }
 
 impl IrepId {
-    pub fn to_string_maybe_ref(&self) -> Result<String, &'static str> {
-        self.to_owned_string().map_err(|_| self.to_static_string())
+    pub fn to_string_cow(&self) -> Cow<str> {
+        match self.to_owned_string() {
+            Some(owned) => Cow::Owned(owned),
+            None => Cow::Borrowed(self.to_static_string()),
+        }
     }
-    fn to_owned_string(&self) -> Result<String, ()> {
+    fn to_owned_string(&self) -> Option<String> {
         match &self {
-            IrepId::FreeformString(s) => Ok(s.to_string()),
-            IrepId::FreeformInteger(i) => Ok(i.to_string()),
-            IrepId::FreeformBitPattern(i) => Ok(format!("{i:X}")),
-            _ => Err(()),
+            IrepId::FreeformString(s) => Some(s.to_string()),
+            IrepId::FreeformInteger(i) => Some(i.to_string()),
+            IrepId::FreeformBitPattern(i) => Some(format!("{i:X}")),
+            _ => None,
         }
     }
     fn to_static_string(&self) -> &'static str {

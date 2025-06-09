@@ -283,13 +283,7 @@ impl IrepNumbering {
     /// Turns a [IrepId] to a [NumberedString]. The [IrepId] gets the number of its
     /// string representation.
     fn number_irep_id(&mut self, irep_id: &IrepId) -> NumberedString {
-        // let wrapper = super::irep_id::SillyWrapper(irep_id);
-        let string: InternedString = match irep_id.to_string_maybe_ref() {
-            Ok(owned) => owned.into(),
-            Err(static_str) => static_str.into(),
-        };
-        self.number_string(&string)
-        // self.number_string(&irep_id.to_string().intern())
+        self.number_string(&irep_id.to_string_cow().intern())
     }
 
     /// Turns an [Irep] into a [NumberedIrep]. The [Irep] is recursively traversed

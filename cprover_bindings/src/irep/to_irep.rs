@@ -575,11 +575,11 @@ impl ToIrep for StmtBody {
             }
             StmtBody::Skip => code_irep(IrepId::Skip, vec![]),
             StmtBody::Switch { control, cases, default } => {
-                let mut switch_arms: Vec<Irep> = vec![]; 
+                let mut switch_arms: Vec<Irep> = vec![];
                 for c in cases {
                     switch_arms.push(c.to_irep(mm));
                 }
-                
+
                 // cases.iter().map(|x| x.to_irep(mm)).collect();
                 if default.is_some() {
                     switch_arms.push(switch_default_irep(default.as_ref().unwrap(), mm));
