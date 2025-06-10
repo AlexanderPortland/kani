@@ -9,6 +9,8 @@ use std::{
     time::Duration,
 };
 
+use serde::{Deserialize, Serialize};
+
 const WARMUP_RUNS: usize = 2; // should be at least one for initial extern crate business
 const TIMED_RUNS: usize = 10;
 
@@ -37,7 +39,21 @@ fn main() {
     let aggr = aggregate_results(&timed_results);
     println!("results are in! {aggr:?}");
 
-    let _sniff = sniff_test(&warmup_results, &timed_results, aggr);
+    let _sniff = sniff_test(&warmup_results, &timed_results, &aggr);
+
+    print_to_file(&aggr);
+}
+
+fn print_to_file(aggr: &AggrInfo) {
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open("out.txt")
+        .unwrap();
+
+    let s = serde_json::to_string_pretty(&aggr).unwrap();
+    f.write(s.as_bytes()).unwrap();
 }
 
 type RunResult = Duration;
@@ -74,15 +90,18 @@ fn extract_duration(s: &str) -> Duration {
     Duration::from_micros(micros)
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct AggrResult(String, AggrInfo);
+
 #[allow(dead_code)]
-#[derive(Debug)]
-struct AggrResult {
+#[derive(Debug, Serialize, Deserialize)]
+struct AggrInfo {
     pub avg: Duration,
     pub std_dev: Duration,
     pub range: (Duration, Duration),
 }
 
-fn aggregate_results(results: &[Duration]) -> AggrResult {
+fn aggregate_results(results: &[Duration]) -> AggrInfo {
     assert!(results.len() == TIMED_RUNS);
 
     let avg = results.iter().sum::<Duration>() / results.len().try_into().unwrap();
@@ -92,7 +111,7 @@ fn aggregate_results(results: &[Duration]) -> AggrResult {
     let std_dev =
         Duration::from_micros((deviations / results.len() as u128).isqrt().try_into().unwrap());
 
-    AggrResult { avg, std_dev, range }
+    AggrInfo { avg, std_dev, range }
 }
 
 #[allow(dead_code)]
@@ -103,7 +122,7 @@ enum PotentialIssue {
 fn sniff_test(
     warmup_results: &[Duration],
     timed_results: &[Duration],
-    _aggr: AggrResult,
+    _aggr: &AggrInfo,
 ) -> Vec<PotentialIssue> {
     let issues = Vec::new();
 
