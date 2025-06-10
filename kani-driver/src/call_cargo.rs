@@ -364,9 +364,9 @@ crate-type = ["lib"]
 
         let compile_start = std::time::Instant::now();
         let artifacts = self.run_build(cargo_cmd)?;
-        let compile_time = compile_start.elapsed();
+        let compile_time = compile_start.elapsed().as_micros();
         if std::env::var("TIME_COMPILER").is_ok() {
-            println!("BUILT {} IN {compile_time:?}", target.name);
+            println!("BUILT {} IN {compile_time:?}μs", target.name);
         }
         debug!(?artifacts, "run_build_target");
 

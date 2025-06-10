@@ -365,6 +365,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "compile-timer"
+version = "0.1.0"
+
+[[package]]
 name = "compiletest"
 version = "0.0.0"
 dependencies = [
