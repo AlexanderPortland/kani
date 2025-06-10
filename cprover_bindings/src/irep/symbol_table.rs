@@ -7,26 +7,26 @@ use std::collections::BTreeMap;
 /// A direct implementation of the CBMC serilization format for symbol tables implemented in
 /// <https://github.com/diffblue/cbmc/blob/develop/src/util/symbol_table.h>
 #[derive(Debug, PartialEq)]
-pub struct SymbolTable {
-    pub symbol_table: BTreeMap<InternedString, Symbol>,
+pub struct SymbolTable<'i> {
+    pub symbol_table: BTreeMap<InternedString, Symbol<'i>>,
 }
 
 /// Constructors
-impl Default for SymbolTable {
+impl<'i> Default for SymbolTable<'i> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SymbolTable {
-    pub fn new() -> SymbolTable {
+impl<'i> SymbolTable<'i> {
+    pub fn new() -> SymbolTable<'i> {
         SymbolTable { symbol_table: BTreeMap::new() }
     }
 }
 
 /// Setters
-impl SymbolTable {
-    pub fn insert(&mut self, symbol: Symbol) {
+impl<'i> SymbolTable<'i> {
+    pub fn insert(&mut self, symbol: Symbol<'i>) {
         self.symbol_table.insert(symbol.name, symbol);
     }
 }

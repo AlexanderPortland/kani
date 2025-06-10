@@ -15,14 +15,14 @@ use std::fmt::Debug;
 /// CBMC implementation code is at:
 /// <https://github.com/diffblue/cbmc/blob/develop/src/util/irep.h>
 #[derive(Clone, Debug, PartialEq)]
-pub struct Irep {
+pub struct Irep<'i> {
     pub id: IrepId,
-    pub sub: Vec<Irep>,
-    pub named_sub: LinearMap<IrepId, Irep>,
+    pub sub: Vec<Irep<'i>, &'i bumpalo::Bump>,
+    pub named_sub: LinearMap<IrepId, Irep<'i>>,
 }
 
 /// Getters
-impl Irep {
+impl Irep<'_> {
     pub fn lookup(&self, key: IrepId) -> Option<&Irep> {
         self.named_sub.get(&key)
     }
@@ -36,10 +36,15 @@ impl Irep {
 }
 
 /// Fluent Builders
-impl Irep {
-    pub fn with_location(self, l: &Location, mm: &MachineModel) -> Self {
+impl<'i> Irep<'i> {
+    pub fn with_location(
+        self,
+        l: &'i Location,
+        mm: &MachineModel,
+        arena: &'i bumpalo::Bump,
+    ) -> Self {
         if !l.is_none() {
-            self.with_named_sub(IrepId::CSourceLocation, l.to_irep(mm))
+            self.with_named_sub(IrepId::CSourceLocation, l.to_irep(mm, arena))
         } else {
             self
         }
@@ -49,30 +54,31 @@ impl Irep {
     /// Note that there might be comments both on the irep itself and
     /// inside the location sub of the irep.
     pub fn with_comment<T: Into<InternedString>>(self, c: T) -> Self {
-        self.with_named_sub(IrepId::Comment, Irep::just_string_id(c))
+        let a = Irep::just_string_id(c, self.sub.allocator());
+        self.with_named_sub(IrepId::Comment, a)
     }
 
-    pub fn with_named_sub(mut self, key: IrepId, value: Irep) -> Self {
+    pub fn with_named_sub(mut self, key: IrepId, value: Irep<'i>) -> Self {
         if !value.is_nil() {
             self.named_sub.insert(key, value);
         }
         self
     }
 
-    pub fn with_named_sub_option(self, key: IrepId, value: Option<Irep>) -> Self {
+    pub fn with_named_sub_option(self, key: IrepId, value: Option<Irep<'i>>) -> Self {
         match value {
             Some(value) => self.with_named_sub(key, value),
             _ => self,
         }
     }
 
-    pub fn with_type(self, t: &Type, mm: &MachineModel) -> Self {
-        self.with_named_sub(IrepId::Type, t.to_irep(mm))
+    pub fn with_type(self, t: &'i Type, mm: &MachineModel, arena: &'i bumpalo::Bump) -> Self {
+        self.with_named_sub(IrepId::Type, t.to_irep(mm, arena))
     }
 }
 
 /// Predicates
-impl Irep {
+impl Irep<'_> {
     pub fn is_just_id(&self) -> bool {
         self.sub.is_empty() && self.named_sub.is_empty()
     }
@@ -91,63 +97,66 @@ impl Irep {
 }
 
 /// Constructors
-impl Irep {
+impl<'i> Irep<'i> {
     /// `__attribute__(constructor)`. Only valid as a function return type.
     /// <https://gcc.gnu.org/onlinedocs/gcc-4.7.0/gcc/Function-Attributes.html>
-    pub fn constructor() -> Irep {
-        Irep::just_id(IrepId::Constructor)
+    pub fn constructor(arena: &'i bumpalo::Bump) -> Irep<'i> {
+        Irep::just_id(IrepId::Constructor, arena)
     }
 
-    pub fn empty() -> Irep {
-        Irep::just_id(IrepId::Empty)
+    pub fn empty(arena: &'i bumpalo::Bump) -> Irep<'i> {
+        Irep::just_id(IrepId::Empty, arena)
     }
 
-    pub fn just_bitpattern_id<T>(i: T, width: u64, signed: bool) -> Irep
+    pub fn just_bitpattern_id<T>(i: T, width: u64, signed: bool, arena: &'i bumpalo::Bump) -> Irep
     where
         T: Into<BigInt>,
     {
-        Irep::just_id(IrepId::bitpattern_from_int(i, width, signed))
+        Irep::just_id(IrepId::bitpattern_from_int(i, width, signed), arena)
     }
 
-    pub fn just_id(id: IrepId) -> Irep {
-        Irep { id, sub: Vec::new(), named_sub: LinearMap::new() }
+    pub fn just_id(id: IrepId, arena: &'i bumpalo::Bump) -> Irep {
+        Irep { id, sub: Vec::new_in(arena), named_sub: LinearMap::new() }
     }
 
-    pub fn just_int_id<T>(i: T) -> Irep
+    pub fn just_int_id<T>(i: T, arena: &'i bumpalo::Bump) -> Irep
     where
         T: Into<BigInt>,
     {
-        Irep::just_id(IrepId::from_int(i))
+        Irep::just_id(IrepId::from_int(i), arena)
     }
-    pub fn just_named_sub(named_sub: LinearMap<IrepId, Irep>) -> Irep {
-        Irep { id: IrepId::EmptyString, sub: vec![], named_sub }
+    pub fn just_named_sub(
+        named_sub: LinearMap<IrepId, Irep<'i>>,
+        arena: &'i bumpalo::Bump,
+    ) -> Irep<'i> {
+        Irep { id: IrepId::EmptyString, sub: Vec::new_in(arena), named_sub }
     }
 
-    pub fn just_string_id<T: Into<InternedString>>(s: T) -> Irep {
-        Irep::just_id(IrepId::from_string(s))
+    pub fn just_string_id<T: Into<InternedString>>(s: T, arena: &'i bumpalo::Bump) -> Irep {
+        Irep::just_id(IrepId::from_string(s), arena)
     }
 
-    pub fn just_sub(sub: Vec<Irep>) -> Irep {
+    pub fn just_sub(sub: Vec<Irep<'i>, &'i bumpalo::Bump>) -> Irep<'i> {
         Irep { id: IrepId::EmptyString, sub, named_sub: LinearMap::new() }
     }
 
-    pub fn nil() -> Irep {
-        Irep::just_id(IrepId::Nil)
+    pub fn nil(arena: &'i bumpalo::Bump) -> Irep {
+        Irep::just_id(IrepId::Nil, arena)
     }
 
-    pub fn one() -> Irep {
-        Irep::just_id(IrepId::Id1)
+    pub fn one(arena: &'i bumpalo::Bump) -> Irep {
+        Irep::just_id(IrepId::Id1, arena)
     }
 
-    pub fn zero() -> Irep {
-        Irep::just_id(IrepId::Id0)
+    pub fn zero(arena: &'i bumpalo::Bump) -> Irep {
+        Irep::just_id(IrepId::Id0, arena)
     }
 
-    pub fn tuple(sub: Vec<Irep>) -> Self {
+    pub fn tuple(sub: Vec<Irep<'i>, &'i bumpalo::Bump>) -> Self {
         Irep {
             id: IrepId::Tuple,
+            named_sub: linear_map![(IrepId::Type, Irep::just_id(IrepId::Tuple, sub.allocator()))],
             sub,
-            named_sub: linear_map![(IrepId::Type, Irep::just_id(IrepId::Tuple))],
         }
     }
 }

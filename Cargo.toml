@@ -31,8 +31,8 @@ path = "src/bin/cargo_kani.rs"
 
 [profile.release]
 strip = "debuginfo"
-codegen-units = 1
-lto = "fat"
+# codegen-units = 1
+# lto = "fat"
 
 [profile.profiling]
 inherits = "release"

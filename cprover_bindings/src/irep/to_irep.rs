@@ -13,35 +13,49 @@ use goto_program::{
 };
 
 pub trait ToIrep {
-    fn to_irep(&self, mm: &MachineModel) -> Irep;
+    fn to_irep<'i>(&'i self, mm: &MachineModel, arena: &'i bumpalo::Bump) -> Irep<'i>;
 }
 
 /// Utility functions
-fn arguments_irep<'a>(arguments: impl Iterator<Item = &'a Expr>, mm: &MachineModel) -> Irep {
-    Irep {
-        id: IrepId::Arguments,
-        sub: arguments.map(|x| x.to_irep(mm)).collect(),
-        named_sub: linear_map![],
+fn arguments_irep<'a: 'i, 'i>(
+    arguments: impl Iterator<Item = &'a Expr>,
+    mm: &MachineModel,
+    arena: &'i bumpalo::Bump,
+) -> Irep<'i> {
+    let mut sub = Vec::new_in(arena);
+
+    for a in arguments {
+        sub.push(a.to_irep(mm, arena));
     }
+
+    Irep { id: IrepId::Arguments, sub, named_sub: linear_map![] }
 }
-fn code_irep(kind: IrepId, ops: Vec<Irep>) -> Irep {
+fn code_irep<'i>(kind: IrepId, ops: Vec<Irep<'i>, &'i bumpalo::Bump>) -> Irep<'i> {
     Irep {
         id: IrepId::Code,
+        named_sub: linear_map![(IrepId::Statement, Irep::just_id(kind, ops.allocator()))],
         sub: ops,
-        named_sub: linear_map![(IrepId::Statement, Irep::just_id(kind))],
     }
 }
-fn side_effect_irep(kind: IrepId, ops: Vec<Irep>) -> Irep {
+fn side_effect_irep<'i>(kind: IrepId, ops: Vec<Irep<'i>, &'i bumpalo::Bump>) -> Irep<'i> {
     Irep {
         id: IrepId::SideEffect,
+        named_sub: linear_map![(IrepId::Statement, Irep::just_id(kind, ops.allocator()))],
         sub: ops,
-        named_sub: linear_map![(IrepId::Statement, Irep::just_id(kind))],
     }
 }
-fn switch_default_irep(body: &Stmt, mm: &MachineModel) -> Irep {
-    code_irep(IrepId::SwitchCase, vec![Irep::nil(), body.to_irep(mm)])
-        .with_named_sub(IrepId::Default, Irep::one())
-        .with_location(body.location(), mm)
+fn switch_default_irep<'i>(
+    body: &'i Stmt,
+    mm: &MachineModel,
+    arena: &'i bumpalo::Bump,
+) -> Irep<'i> {
+    let mut ops = Vec::new_in(arena);
+    ops.push(Irep::nil(arena));
+    ops.push(body.to_irep(mm, arena));
+
+    code_irep(IrepId::SwitchCase, ops)
+        .with_named_sub(IrepId::Default, Irep::one(arena))
+        .with_location(body.location(), mm, arena)
 }
 
 /// ID Converters
@@ -129,129 +143,155 @@ impl ToIrepId for UnaryOperator {
 
 /// The main converters
 impl ToIrep for DatatypeComponent {
-    fn to_irep(&self, mm: &MachineModel) -> Irep {
+    fn to_irep<'i>(&'i self, mm: &MachineModel, arena: &'i bumpalo::Bump) -> Irep<'i> {
         match self {
-            DatatypeComponent::Field { name, typ } => Irep::just_named_sub(linear_map![
-                (IrepId::Name, Irep::just_string_id(name.to_string())),
-                (IrepId::CPrettyName, Irep::just_string_id(name.to_string())),
-                (IrepId::Type, typ.to_irep(mm)),
-            ]),
-            DatatypeComponent::Padding { name, bits } => Irep::just_named_sub(linear_map![
-                (IrepId::CIsPadding, Irep::one()),
-                (IrepId::Name, Irep::just_string_id(name.to_string())),
-                (IrepId::Type, Type::unsigned_int(*bits).to_irep(mm)),
-            ]),
+            DatatypeComponent::Field { name, typ } => Irep::just_named_sub(
+                linear_map![
+                    (IrepId::Name, Irep::just_string_id(name.to_string(), arena)),
+                    (IrepId::CPrettyName, Irep::just_string_id(name.to_string(), arena)),
+                    (IrepId::Type, typ.to_irep(mm, arena)),
+                ],
+                arena,
+            ),
+            DatatypeComponent::Padding { name, bits } => Irep::just_named_sub(
+                linear_map![
+                    (IrepId::CIsPadding, Irep::one(arena)),
+                    (IrepId::Name, Irep::just_string_id(name.to_string(), arena)),
+                    (IrepId::Type, Type::unsigned_int(*bits).to_irep(mm, arena)),
+                ],
+                arena,
+            ),
         }
     }
 }
 
 impl ToIrep for Expr {
-    fn to_irep(&self, mm: &MachineModel) -> Irep {
+    fn to_irep<'i>(&'i self, mm: &MachineModel, arena: &'i bumpalo::Bump) -> Irep<'i> {
         if let ExprValue::IntConstant(i) = self.value() {
             let typ_width = self.typ().native_width(mm);
             let irep_value = if let Some(width) = typ_width {
-                Irep::just_bitpattern_id(i.clone(), width, self.typ().is_signed(mm))
+                Irep::just_bitpattern_id(i.clone(), width, self.typ().is_signed(mm), arena)
             } else {
-                Irep::just_int_id(i.clone())
+                Irep::just_int_id(i.clone(), arena)
             };
             Irep {
                 id: IrepId::Constant,
-                sub: vec![],
+                sub: Vec::new_in(arena),
                 named_sub: linear_map![(IrepId::Value, irep_value,)],
             }
-            .with_location(self.location(), mm)
-            .with_type(self.typ(), mm)
+            .with_location(self.location(), mm, arena)
+            .with_type(self.typ(), mm, arena)
         } else {
-            self.value().to_irep(mm).with_location(self.location(), mm).with_type(self.typ(), mm)
+            self.value().to_irep(mm, arena).with_location(self.location(), mm, arena).with_type(
+                self.typ(),
+                mm,
+                arena,
+            )
         }
         .with_named_sub_option(
             IrepId::CCSizeofType,
-            self.size_of_annotation().map(|ty| ty.to_irep(mm)),
+            self.size_of_annotation().map(|ty| ty.to_irep(mm, arena)),
         )
     }
 }
 
-impl Irep {
-    pub fn symbol(identifier: InternedString) -> Self {
+impl<'i> Irep<'i> {
+    pub fn symbol(identifier: InternedString, arena: &'i bumpalo::Bump) -> Self {
         Irep {
             id: IrepId::Symbol,
-            sub: vec![],
-            named_sub: linear_map![(IrepId::Identifier, Irep::just_string_id(identifier))],
+            sub: Vec::new_in(arena),
+            named_sub: linear_map![(IrepId::Identifier, Irep::just_string_id(identifier, arena))],
         }
     }
 }
 
 impl ToIrep for ExprValue {
-    fn to_irep(&self, mm: &MachineModel) -> Irep {
+    fn to_irep<'i>(&'i self, mm: &MachineModel, arena: &'i bumpalo::Bump) -> Irep {
+        let mut sub = Vec::new_in(arena);
         match self {
             ExprValue::AddressOf(e) => {
-                Irep { id: IrepId::AddressOf, sub: vec![e.to_irep(mm)], named_sub: linear_map![] }
+                sub.push(e.to_irep(mm, arena));
+                Irep { id: IrepId::AddressOf, sub, named_sub: linear_map![] }
             }
-            ExprValue::Array { elems } => Irep {
-                id: IrepId::Array,
-                sub: elems.iter().map(|x| x.to_irep(mm)).collect(),
-                named_sub: linear_map![],
-            },
+            ExprValue::Array { elems } => {
+                for e in elems {
+                    sub.push(e.to_irep(mm, arena));
+                }
+
+                Irep { id: IrepId::Array, sub, named_sub: linear_map![] }
+            }
             ExprValue::ArrayOf { elem } => {
-                Irep { id: IrepId::ArrayOf, sub: vec![elem.to_irep(mm)], named_sub: linear_map![] }
+                sub.push(elem.to_irep(mm, arena));
+                Irep { id: IrepId::ArrayOf, sub, named_sub: linear_map![] }
             }
             ExprValue::Assign { left, right } => {
-                side_effect_irep(IrepId::Assign, vec![left.to_irep(mm), right.to_irep(mm)])
+                sub.extend_from_slice(&[left.to_irep(mm, arena), right.to_irep(mm, arena)]);
+                side_effect_irep(IrepId::Assign, sub)
             }
-            ExprValue::BinOp { op, lhs, rhs } => Irep {
-                id: op.to_irep_id(),
-                sub: vec![lhs.to_irep(mm), rhs.to_irep(mm)],
-                named_sub: linear_map![],
-            },
+            ExprValue::BinOp { op, lhs, rhs } => {
+                sub.extend_from_slice(&[lhs.to_irep(mm, arena), rhs.to_irep(mm, arena)]);
+                Irep { id: op.to_irep_id(), sub, named_sub: linear_map![] }
+            }
             ExprValue::BoolConstant(c) => Irep {
                 id: IrepId::Constant,
-                sub: vec![],
+                sub: Vec::new_in(arena),
                 named_sub: linear_map![(
                     IrepId::Value,
-                    if *c { Irep::just_id(IrepId::True) } else { Irep::just_id(IrepId::False) },
+                    if *c {
+                        Irep::just_id(IrepId::True, arena)
+                    } else {
+                        Irep::just_id(IrepId::False, arena)
+                    },
                 )],
             },
-            ExprValue::ByteExtract { e, offset } => Irep {
-                id: if mm.is_big_endian {
-                    IrepId::ByteExtractBigEndian
-                } else {
-                    IrepId::ByteExtractLittleEndian
-                },
-                sub: vec![e.to_irep(mm), Expr::int_constant(*offset, Type::ssize_t()).to_irep(mm)],
-                named_sub: linear_map![],
-            },
+            ExprValue::ByteExtract { e, offset } => {
+                sub.extend_from_slice(&[
+                    e.to_irep(mm, arena),
+                    Expr::int_constant(*offset, Type::ssize_t()).to_irep(mm, arena),
+                ]);
+                Irep {
+                    id: if mm.is_big_endian {
+                        IrepId::ByteExtractBigEndian
+                    } else {
+                        IrepId::ByteExtractLittleEndian
+                    },
+                    sub,
+                    named_sub: linear_map![],
+                }
+            }
             ExprValue::CBoolConstant(i) => Irep {
                 id: IrepId::Constant,
-                sub: vec![],
+                sub: Vec::new_in(arena),
                 named_sub: linear_map![(
                     IrepId::Value,
-                    Irep::just_bitpattern_id(if *i { 1u8 } else { 0 }, mm.bool_width, false)
+                    Irep::just_bitpattern_id(if *i { 1u8 } else { 0 }, mm.bool_width, false, arena)
                 )],
             },
             ExprValue::Dereference(e) => {
-                Irep { id: IrepId::Dereference, sub: vec![e.to_irep(mm)], named_sub: linear_map![] }
+                sub.push(e.to_irep(mm, arena));
+                Irep { id: IrepId::Dereference, sub, named_sub: linear_map![] }
             }
             //TODO, determine if there is an endineness problem here
             ExprValue::DoubleConstant(i) => {
                 let c: u64 = i.to_bits();
                 Irep {
                     id: IrepId::Constant,
-                    sub: vec![],
+                    sub: Vec::new_in(arena),
                     named_sub: linear_map![(
                         IrepId::Value,
-                        Irep::just_bitpattern_id(c, mm.double_width, false)
+                        Irep::just_bitpattern_id(c, mm.double_width, false, arena)
                     )],
                 }
             }
-            ExprValue::EmptyUnion => Irep::just_id(IrepId::EmptyUnion),
+            ExprValue::EmptyUnion => Irep::just_id(IrepId::EmptyUnion, arena),
             ExprValue::FloatConstant(i) => {
                 let c: u32 = i.to_bits();
                 Irep {
                     id: IrepId::Constant,
-                    sub: vec![],
+                    sub: Vec::new_in(arena),
                     named_sub: linear_map![(
                         IrepId::Value,
-                        Irep::just_bitpattern_id(c, mm.float_width, false)
+                        Irep::just_bitpattern_id(c, mm.float_width, false, arena)
                     )],
                 }
             }
@@ -259,161 +299,185 @@ impl ToIrep for ExprValue {
                 let c: u16 = i.to_bits();
                 Irep {
                     id: IrepId::Constant,
-                    sub: vec![],
-                    named_sub: linear_map![(IrepId::Value, Irep::just_bitpattern_id(c, 16, false))],
+                    sub: Vec::new_in(arena),
+                    named_sub: linear_map![(
+                        IrepId::Value,
+                        Irep::just_bitpattern_id(c, 16, false, arena)
+                    )],
                 }
             }
             ExprValue::Float128Constant(i) => {
                 let c: u128 = i.to_bits();
                 Irep {
                     id: IrepId::Constant,
-                    sub: vec![],
+                    sub: Vec::new_in(arena),
                     named_sub: linear_map![(
                         IrepId::Value,
-                        Irep::just_bitpattern_id(c, 128, false)
+                        Irep::just_bitpattern_id(c, 128, false, arena)
                     )],
                 }
             }
-            ExprValue::FunctionCall { function, arguments } => side_effect_irep(
-                IrepId::FunctionCall,
-                vec![function.to_irep(mm), arguments_irep(arguments.iter(), mm)],
-            ),
-            ExprValue::If { c, t, e } => Irep {
-                id: IrepId::If,
-                sub: vec![c.to_irep(mm), t.to_irep(mm), e.to_irep(mm)],
-                named_sub: linear_map![],
-            },
-            ExprValue::Index { array, index } => Irep {
-                id: IrepId::Index,
-                sub: vec![array.to_irep(mm), index.to_irep(mm)],
-                named_sub: linear_map![],
-            },
+            ExprValue::FunctionCall { function, arguments } => {
+                sub.extend_from_slice(&[
+                    function.to_irep(mm, arena),
+                    arguments_irep(arguments.iter(), mm, arena),
+                ]);
+                side_effect_irep(IrepId::FunctionCall, sub)
+            }
+            ExprValue::If { c, t, e } => {
+                sub.extend([c.to_irep(mm, arena), t.to_irep(mm, arena), e.to_irep(mm, arena)]);
+                Irep { id: IrepId::If, sub, named_sub: linear_map![] }
+            }
+            ExprValue::Index { array, index } => {
+                sub.extend([array.to_irep(mm, arena), index.to_irep(mm, arena)]);
+                Irep { id: IrepId::Index, sub, named_sub: linear_map![] }
+            }
             ExprValue::IntConstant(_) => {
                 unreachable!("Should have been processed in previous step")
             }
-            ExprValue::Member { lhs, field } => Irep {
-                id: IrepId::Member,
-                sub: vec![lhs.to_irep(mm)],
-                named_sub: linear_map![
-                    (IrepId::CLvalue, Irep::one()),
-                    (IrepId::ComponentName, Irep::just_string_id(field.to_string())),
-                ],
-            },
-            ExprValue::Nondet => side_effect_irep(IrepId::Nondet, vec![]),
+            ExprValue::Member { lhs, field } => {
+                sub.extend([lhs.to_irep(mm, arena)]);
+                Irep {
+                    id: IrepId::Member,
+                    sub,
+                    named_sub: linear_map![
+                        (IrepId::CLvalue, Irep::one(arena)),
+                        (IrepId::ComponentName, Irep::just_string_id(field.to_string(), arena)),
+                    ],
+                }
+            }
+            ExprValue::Nondet => side_effect_irep(IrepId::Nondet, Vec::new_in(arena)),
             ExprValue::PointerConstant(0) => Irep {
                 id: IrepId::Constant,
-                sub: vec![],
-                named_sub: linear_map![(IrepId::Value, Irep::just_id(IrepId::NULL))],
+                sub: Vec::new_in(arena),
+                named_sub: linear_map![(IrepId::Value, Irep::just_id(IrepId::NULL, arena))],
             },
             ExprValue::PointerConstant(i) => Irep {
                 id: IrepId::Constant,
-                sub: vec![],
+                sub: Vec::new_in(arena),
                 named_sub: linear_map![(
                     IrepId::Value,
-                    Irep::just_bitpattern_id(*i, mm.pointer_width, false)
+                    Irep::just_bitpattern_id(*i, mm.pointer_width, false, arena)
                 )],
             },
-            ExprValue::ReadOk { ptr, size } => Irep {
-                id: IrepId::ROk,
-                sub: vec![ptr.to_irep(mm), size.to_irep(mm)],
-                named_sub: linear_map![],
-            },
-            ExprValue::SelfOp { op, e } => side_effect_irep(op.to_irep_id(), vec![e.to_irep(mm)]),
-            ExprValue::StatementExpression { statements: ops, location: loc } => side_effect_irep(
-                IrepId::StatementExpression,
-                vec![Stmt::block(ops.to_vec(), *loc).to_irep(mm)],
-            ),
+            ExprValue::ReadOk { ptr, size } => {
+                sub.extend([ptr.to_irep(mm, arena), size.to_irep(mm, arena)]);
+                Irep { id: IrepId::ROk, sub, named_sub: linear_map![] }
+            }
+            ExprValue::SelfOp { op, e } => {
+                sub.extend([e.to_irep(mm, arena)]);
+                side_effect_irep(op.to_irep_id(), sub)
+            }
+            ExprValue::StatementExpression { statements: ops, location: loc } => {
+                sub.extend([Stmt::block(ops.to_vec(), *loc).to_irep(mm, arena)]);
+                side_effect_irep(IrepId::StatementExpression, sub)
+            }
             ExprValue::StringConstant { s } => Irep {
                 id: IrepId::StringConstant,
-                sub: vec![],
-                named_sub: linear_map![(IrepId::Value, Irep::just_string_id(s.to_string()),)],
+                sub: Vec::new_in(arena),
+                named_sub: linear_map![
+                    (IrepId::Value, Irep::just_string_id(s.to_string(), arena),)
+                ],
             },
-            ExprValue::Struct { values } => Irep {
-                id: IrepId::Struct,
-                sub: values.iter().map(|x| x.to_irep(mm)).collect(),
-                named_sub: linear_map![],
-            },
-            ExprValue::Symbol { identifier } => Irep::symbol(*identifier),
+            ExprValue::Struct { values } => {
+                sub.extend(values.iter().map(|x| x.to_irep(mm, arena)));
+                Irep { id: IrepId::Struct, sub, named_sub: linear_map![] }
+            }
+            ExprValue::Symbol { identifier } => Irep::symbol(*identifier, arena),
             ExprValue::Typecast(e) => {
-                Irep { id: IrepId::Typecast, sub: vec![e.to_irep(mm)], named_sub: linear_map![] }
+                sub.extend([e.to_irep(mm, arena)]);
+                Irep { id: IrepId::Typecast, sub, named_sub: linear_map![] }
             }
-            ExprValue::Union { value, field } => Irep {
-                id: IrepId::Union,
-                sub: vec![value.to_irep(mm)],
-                named_sub: linear_map![(
-                    IrepId::ComponentName,
-                    Irep::just_string_id(field.to_string()),
-                )],
-            },
-            ExprValue::UnOp { op: UnaryOperator::Bswap, e } => Irep {
-                id: IrepId::Bswap,
-                sub: vec![e.to_irep(mm)],
-                named_sub: linear_map![(IrepId::BitsPerByte, Irep::just_int_id(8u8))],
-            },
+            ExprValue::Union { value, field } => {
+                sub.extend([value.to_irep(mm, arena)]);
+                Irep {
+                    id: IrepId::Union,
+                    sub,
+                    named_sub: linear_map![(
+                        IrepId::ComponentName,
+                        Irep::just_string_id(field.to_string(), arena),
+                    )],
+                }
+            }
+            ExprValue::UnOp { op: UnaryOperator::Bswap, e } => {
+                sub.extend([e.to_irep(mm, arena)]);
+                Irep {
+                    id: IrepId::Bswap,
+                    sub,
+                    named_sub: linear_map![(IrepId::BitsPerByte, Irep::just_int_id(8u8, arena))],
+                }
+            }
             ExprValue::UnOp { op: UnaryOperator::BitReverse, e } => {
-                Irep { id: IrepId::BitReverse, sub: vec![e.to_irep(mm)], named_sub: linear_map![] }
+                sub.extend([e.to_irep(mm, arena)]);
+                Irep { id: IrepId::BitReverse, sub, named_sub: linear_map![] }
             }
-            ExprValue::UnOp { op: UnaryOperator::CountLeadingZeros { allow_zero }, e } => Irep {
-                id: IrepId::CountLeadingZeros,
-                sub: vec![e.to_irep(mm)],
-                named_sub: linear_map![(
-                    IrepId::CBoundsCheck,
-                    if *allow_zero { Irep::zero() } else { Irep::one() }
-                )],
-            },
-            ExprValue::UnOp { op: UnaryOperator::CountTrailingZeros { allow_zero }, e } => Irep {
-                id: IrepId::CountTrailingZeros,
-                sub: vec![e.to_irep(mm)],
-                named_sub: linear_map![(
-                    IrepId::CBoundsCheck,
-                    if *allow_zero { Irep::zero() } else { Irep::one() }
-                )],
-            },
+            ExprValue::UnOp { op: UnaryOperator::CountLeadingZeros { allow_zero }, e } => {
+                sub.extend([e.to_irep(mm, arena)]);
+                Irep {
+                    id: IrepId::CountLeadingZeros,
+                    sub,
+                    named_sub: linear_map![(
+                        IrepId::CBoundsCheck,
+                        if *allow_zero { Irep::zero(arena) } else { Irep::one(arena) }
+                    )],
+                }
+            }
+            ExprValue::UnOp { op: UnaryOperator::CountTrailingZeros { allow_zero }, e } => {
+                sub.extend([e.to_irep(mm, arena)]);
+                Irep {
+                    id: IrepId::CountTrailingZeros,
+                    sub,
+                    named_sub: linear_map![(
+                        IrepId::CBoundsCheck,
+                        if *allow_zero { Irep::zero(arena) } else { Irep::one(arena) }
+                    )],
+                }
+            }
             ExprValue::UnOp { op, e } => {
-                Irep { id: op.to_irep_id(), sub: vec![e.to_irep(mm)], named_sub: linear_map![] }
+                sub.extend([e.to_irep(mm, arena)]);
+                Irep { id: op.to_irep_id(), sub, named_sub: linear_map![] }
             }
-            ExprValue::Vector { elems } => Irep {
-                id: IrepId::Vector,
-                sub: elems.iter().map(|x| x.to_irep(mm)).collect(),
-                named_sub: linear_map![],
-            },
-            ExprValue::Forall { variable, domain } => Irep {
-                id: IrepId::Forall,
-                sub: vec![
-                    Irep {
-                        id: IrepId::Tuple,
-                        sub: vec![variable.to_irep(mm)],
-                        named_sub: linear_map![],
-                    },
-                    domain.to_irep(mm),
-                ],
-                named_sub: linear_map![],
-            },
-            ExprValue::Exists { variable, domain } => Irep {
-                id: IrepId::Exists,
-                sub: vec![
-                    Irep {
-                        id: IrepId::Tuple,
-                        sub: vec![variable.to_irep(mm)],
-                        named_sub: linear_map![],
-                    },
-                    domain.to_irep(mm),
-                ],
-                named_sub: linear_map![],
-            },
+            ExprValue::Vector { elems } => {
+                sub.extend(elems.iter().map(|x| x.to_irep(mm, arena)));
+                Irep { id: IrepId::Vector, sub, named_sub: linear_map![] }
+            }
+            ExprValue::Forall { variable, domain } => {
+                let mut new_sub = Vec::new_in(arena);
+                new_sub.extend([variable.to_irep(mm, arena)]);
+                sub.extend([
+                    Irep { id: IrepId::Tuple, sub: new_sub, named_sub: linear_map![] },
+                    domain.to_irep(mm, arena),
+                ]);
+                Irep { id: IrepId::Forall, sub, named_sub: linear_map![] }
+            }
+            ExprValue::Exists { variable, domain } => {
+                let mut new_sub = Vec::new_in(arena);
+                new_sub.extend([variable.to_irep(mm, arena)]);
+                sub.extend([
+                    Irep { id: IrepId::Tuple, sub: new_sub, named_sub: linear_map![] },
+                    domain.to_irep(mm, arena),
+                ]);
+                Irep { id: IrepId::Exists, sub, named_sub: linear_map![] }
+            }
         }
     }
 }
 
 impl ToIrep for Location {
-    fn to_irep(&self, _mm: &MachineModel) -> Irep {
+    fn to_irep<'i>(&'i self, _mm: &MachineModel, arena: &'i bumpalo::Bump) -> Irep<'i> {
         match self {
-            Location::None => Irep::nil(),
-            Location::BuiltinFunction { line, function_name } => Irep::just_named_sub(linear_map![
-                (IrepId::File, Irep::just_string_id(format!("<builtin-library-{function_name}>")),),
-                (IrepId::Function, Irep::just_string_id(function_name.to_string())),
-            ])
-            .with_named_sub_option(IrepId::Line, line.map(Irep::just_int_id)),
+            Location::None => Irep::nil(arena),
+            Location::BuiltinFunction { line, function_name } => Irep::just_named_sub(
+                linear_map![
+                    (
+                        IrepId::File,
+                        Irep::just_string_id(format!("<builtin-library-{function_name}>"), arena),
+                    ),
+                    (IrepId::Function, Irep::just_string_id(function_name.to_string(), arena)),
+                ],
+                arena,
+            )
+            .with_named_sub_option(IrepId::Line, line.map(|w| Irep::just_int_id(w, arena))),
             Location::Loc {
                 file,
                 function,
@@ -422,34 +486,50 @@ impl ToIrep for Location {
                 end_line: _,
                 end_col: _,
                 pragmas,
-            } => Irep::just_named_sub(linear_map![
-                (IrepId::File, Irep::just_string_id(file.to_string())),
-                (IrepId::Line, Irep::just_int_id(*start_line)),
-            ])
-            .with_named_sub_option(IrepId::Column, start_col.map(Irep::just_int_id))
-            .with_named_sub_option(IrepId::Function, function.map(Irep::just_string_id))
+            } => Irep::just_named_sub(
+                linear_map![
+                    (IrepId::File, Irep::just_string_id(file.to_string(), arena)),
+                    (IrepId::Line, Irep::just_int_id(*start_line, arena)),
+                ],
+                arena,
+            )
+            .with_named_sub_option(IrepId::Column, start_col.map(|w| Irep::just_int_id(w, arena)))
+            .with_named_sub_option(
+                IrepId::Function,
+                function.map(|w| Irep::just_string_id(w, arena)),
+            )
             .with_named_sub_option(
                 IrepId::Pragma,
                 Some(Irep::just_named_sub(
                     pragmas
                         .iter()
                         .map(|pragma| {
-                            (IrepId::from_string(*pragma), Irep::just_id(IrepId::EmptyString))
+                            (
+                                IrepId::from_string(*pragma),
+                                Irep::just_id(IrepId::EmptyString, arena),
+                            )
                         })
                         .collect(),
+                    arena,
                 )),
             ),
             Location::Property { file, function, line, col, property_class, comment, pragmas } => {
-                Irep::just_named_sub(linear_map![
-                    (IrepId::File, Irep::just_string_id(file.to_string())),
-                    (IrepId::Line, Irep::just_int_id(*line)),
-                ])
-                .with_named_sub_option(IrepId::Column, col.map(Irep::just_int_id))
-                .with_named_sub_option(IrepId::Function, function.map(Irep::just_string_id))
-                .with_named_sub(IrepId::Comment, Irep::just_string_id(comment.to_string()))
+                Irep::just_named_sub(
+                    linear_map![
+                        (IrepId::File, Irep::just_string_id(file.to_string(), arena)),
+                        (IrepId::Line, Irep::just_int_id(*line, arena)),
+                    ],
+                    arena,
+                )
+                .with_named_sub_option(IrepId::Column, col.map(|w| Irep::just_int_id(w, arena)))
+                .with_named_sub_option(
+                    IrepId::Function,
+                    function.map(|w| Irep::just_string_id(w, arena)),
+                )
+                .with_named_sub(IrepId::Comment, Irep::just_string_id(comment.to_string(), arena))
                 .with_named_sub(
                     IrepId::PropertyClass,
-                    Irep::just_string_id(property_class.to_string()),
+                    Irep::just_string_id(property_class.to_string(), arena),
                 )
                 .with_named_sub_option(
                     IrepId::Pragma,
@@ -457,149 +537,192 @@ impl ToIrep for Location {
                         pragmas
                             .iter()
                             .map(|pragma| {
-                                (IrepId::from_string(*pragma), Irep::just_id(IrepId::EmptyString))
+                                (
+                                    IrepId::from_string(*pragma),
+                                    Irep::just_id(IrepId::EmptyString, arena),
+                                )
                             })
                             .collect(),
+                        arena,
                     )),
                 )
             }
-            Location::PropertyUnknownLocation { property_class, comment } => {
-                Irep::just_named_sub(linear_map![
-                    (IrepId::Comment, Irep::just_string_id(comment.to_string())),
-                    (IrepId::PropertyClass, Irep::just_string_id(property_class.to_string()))
-                ])
-            }
+            Location::PropertyUnknownLocation { property_class, comment } => Irep::just_named_sub(
+                linear_map![
+                    (IrepId::Comment, Irep::just_string_id(comment.to_string(), arena)),
+                    (
+                        IrepId::PropertyClass,
+                        Irep::just_string_id(property_class.to_string(), arena)
+                    )
+                ],
+                arena,
+            ),
         }
     }
 }
 
 impl ToIrep for Parameter {
-    fn to_irep(&self, mm: &MachineModel) -> Irep {
+    fn to_irep<'i>(&'i self, mm: &MachineModel, arena: &'i bumpalo::Bump) -> Irep<'i> {
         Irep {
             id: IrepId::Parameter,
-            sub: vec![],
-            named_sub: linear_map![(IrepId::Type, self.typ().to_irep(mm))],
+            sub: Vec::new_in(arena),
+            named_sub: linear_map![(IrepId::Type, self.typ().to_irep(mm, arena))],
         }
-        .with_named_sub_option(IrepId::CIdentifier, self.identifier().map(Irep::just_string_id))
-        .with_named_sub_option(IrepId::CBaseName, self.base_name().map(Irep::just_string_id))
+        .with_named_sub_option(
+            IrepId::CIdentifier,
+            self.identifier().map(|w| Irep::just_string_id(w, arena)),
+        )
+        .with_named_sub_option(
+            IrepId::CBaseName,
+            self.base_name().map(|w| Irep::just_string_id(w, arena)),
+        )
     }
 }
 
 impl ToIrep for Stmt {
-    fn to_irep(&self, mm: &MachineModel) -> Irep {
-        self.body().to_irep(mm).with_location(self.location(), mm)
+    fn to_irep<'i>(&'i self, mm: &MachineModel, arena: &'i bumpalo::Bump) -> Irep<'i> {
+        self.body().to_irep(mm, arena).with_location(self.location(), mm, arena)
     }
 }
 
 impl ToIrep for StmtBody {
-    fn to_irep(&self, mm: &MachineModel) -> Irep {
+    fn to_irep<'i>(&'i self, mm: &MachineModel, arena: &'i bumpalo::Bump) -> Irep<'i> {
+        let mut ops = Vec::new_in(arena);
         match self {
             StmtBody::Assign { lhs, rhs } => {
-                code_irep(IrepId::Assign, vec![lhs.to_irep(mm), rhs.to_irep(mm)])
+                ops.extend([lhs.to_irep(mm, arena), rhs.to_irep(mm, arena)]);
+                code_irep(IrepId::Assign, ops)
             }
-            StmtBody::Assert { cond, .. } => code_irep(IrepId::Assert, vec![cond.to_irep(mm)]),
-            StmtBody::Assume { cond } => code_irep(IrepId::Assume, vec![cond.to_irep(mm)]),
+            StmtBody::Assert { cond, .. } => {
+                ops.extend([cond.to_irep(mm, arena)]);
+                code_irep(IrepId::Assert, ops)
+            }
+            StmtBody::Assume { cond } => {
+                ops.extend([cond.to_irep(mm, arena)]);
+                code_irep(IrepId::Assume, ops)
+            }
             StmtBody::AtomicBlock(stmts) => {
-                let mut irep_stmts = vec![code_irep(IrepId::AtomicBegin, vec![])];
+                let mut irep_stmts = Vec::new_in(arena);
+                irep_stmts.push(code_irep(IrepId::AtomicBegin, Vec::new_in(arena)));
                 for x in stmts {
-                    irep_stmts.push(x.to_irep(mm));
+                    irep_stmts.push(x.to_irep(mm, arena));
                 }
-                // irep_stmts.append(&mut stmts.iter().map(|x| x.to_irep(mm)).collect());
-                irep_stmts.push(code_irep(IrepId::AtomicEnd, vec![]));
+                // irep_stmts.append(&mut stmts.iter().map(|x| x.to_irep(mm, arena)).collect());
+                irep_stmts.push(code_irep(IrepId::AtomicEnd, Vec::new_in(arena)));
                 code_irep(IrepId::Block, irep_stmts)
             }
             StmtBody::Block(stmts) => {
-                let mut sub = vec![];
+                let mut sub = Vec::new_in(arena);
                 for s in stmts {
-                    sub.push(s.to_irep(mm));
+                    sub.push(s.to_irep(mm, arena));
                 }
                 code_irep(IrepId::Block, sub)
             }
-            StmtBody::Break => code_irep(IrepId::Break, vec![]),
-            StmtBody::Continue => code_irep(IrepId::Continue, vec![]),
-            StmtBody::Dead(symbol) => code_irep(IrepId::Dead, vec![symbol.to_irep(mm)]),
+            StmtBody::Break => code_irep(IrepId::Break, Vec::new_in(arena)),
+            StmtBody::Continue => code_irep(IrepId::Continue, Vec::new_in(arena)),
+            StmtBody::Dead(symbol) => {
+                ops.extend([symbol.to_irep(mm, arena)]);
+                code_irep(IrepId::Dead, ops)
+            }
             StmtBody::Decl { lhs, value } => {
                 if value.is_some() {
-                    code_irep(
-                        IrepId::Decl,
-                        vec![lhs.to_irep(mm), value.as_ref().unwrap().to_irep(mm)],
-                    )
+                    ops.extend([
+                        lhs.to_irep(mm, arena),
+                        value.as_ref().unwrap().to_irep(mm, arena),
+                    ]);
+                    code_irep(IrepId::Decl, ops)
                 } else {
-                    code_irep(IrepId::Decl, vec![lhs.to_irep(mm)])
+                    ops.extend([lhs.to_irep(mm, arena)]);
+                    code_irep(IrepId::Decl, ops)
                 }
             }
             StmtBody::Deinit(place) => {
                 // CBMC doesn't yet have a notion of poison (https://github.com/diffblue/cbmc/issues/7014)
                 // So we translate identically to `nondet` here, but add a comment noting we wish it were poison
                 // potentially for other backends to pick up and treat specially.
-                code_irep(IrepId::Assign, vec![place.to_irep(mm), place.typ().nondet().to_irep(mm)])
-                    .with_comment("deinit")
+                ops.extend([place.to_irep(mm, arena), place.typ().nondet().to_irep(mm, arena)]);
+                code_irep(IrepId::Assign, ops).with_comment("deinit")
             }
-            StmtBody::Expression(e) => code_irep(IrepId::Expression, vec![e.to_irep(mm)]),
-            StmtBody::For { init, cond, update, body } => code_irep(
-                IrepId::For,
-                vec![init.to_irep(mm), cond.to_irep(mm), update.to_irep(mm), body.to_irep(mm)],
-            ),
-            StmtBody::FunctionCall { lhs, function, arguments } => code_irep(
-                IrepId::FunctionCall,
-                vec![
-                    lhs.as_ref().map_or(Irep::nil(), |x| x.to_irep(mm)),
-                    function.to_irep(mm),
-                    arguments_irep(arguments.iter(), mm),
-                ],
-            ),
+            StmtBody::Expression(e) => {
+                ops.extend([e.to_irep(mm, arena)]);
+                code_irep(IrepId::Expression, ops)
+            }
+            StmtBody::For { init, cond, update, body } => {
+                ops.extend([
+                    init.to_irep(mm, arena),
+                    cond.to_irep(mm, arena),
+                    update.to_irep(mm, arena),
+                    body.to_irep(mm, arena),
+                ]);
+                code_irep(IrepId::For, ops)
+            }
+            StmtBody::FunctionCall { lhs, function, arguments } => {
+                ops.extend([
+                    lhs.as_ref().map_or(Irep::nil(arena), |x| x.to_irep(mm, arena)),
+                    function.to_irep(mm, arena),
+                    arguments_irep(arguments.iter(), mm, arena),
+                ]);
+                code_irep(IrepId::FunctionCall, ops)
+            }
             StmtBody::Goto { dest, loop_invariants } => {
-                let stmt_goto = code_irep(IrepId::Goto, vec![])
-                    .with_named_sub(IrepId::Destination, Irep::just_string_id(dest.to_string()));
+                let stmt_goto = code_irep(IrepId::Goto, Vec::new_in(arena)).with_named_sub(
+                    IrepId::Destination,
+                    Irep::just_string_id(dest.to_string(), arena),
+                );
                 if let Some(inv) = loop_invariants {
                     stmt_goto.with_named_sub(
                         IrepId::CSpecLoopInvariant,
-                        inv.clone().and(Expr::bool_true()).to_irep(mm),
+                        inv.clone().and(Expr::bool_true()).to_irep(mm, arena),
                     )
                 } else {
                     stmt_goto
                 }
             }
-            StmtBody::Ifthenelse { i, t, e } => code_irep(
-                IrepId::Ifthenelse,
-                vec![
-                    i.to_irep(mm),
-                    t.to_irep(mm),
-                    e.as_ref().map_or(Irep::nil(), |x| x.to_irep(mm)),
-                ],
-            ),
-            StmtBody::Label { label, body } => code_irep(IrepId::Label, vec![body.to_irep(mm)])
-                .with_named_sub(IrepId::Label, Irep::just_string_id(label.to_string())),
-            StmtBody::Return(e) => {
-                code_irep(IrepId::Return, vec![e.as_ref().map_or(Irep::nil(), |x| x.to_irep(mm))])
+            StmtBody::Ifthenelse { i, t, e } => {
+                ops.extend([
+                    i.to_irep(mm, arena),
+                    t.to_irep(mm, arena),
+                    e.as_ref().map_or(Irep::nil(arena), |x| x.to_irep(mm, arena)),
+                ]);
+                code_irep(IrepId::Ifthenelse, ops)
             }
-            StmtBody::Skip => code_irep(IrepId::Skip, vec![]),
+            StmtBody::Label { label, body } => {
+                ops.extend([body.to_irep(mm, arena)]);
+                code_irep(IrepId::Label, ops)
+            }
+            .with_named_sub(IrepId::Label, Irep::just_string_id(label.to_string(), arena)),
+            StmtBody::Return(e) => {
+                ops.extend([e.as_ref().map_or(Irep::nil(arena), |x| x.to_irep(mm, arena))]);
+                code_irep(IrepId::Return, ops)
+            }
+            StmtBody::Skip => code_irep(IrepId::Skip, Vec::new_in(arena)),
             StmtBody::Switch { control, cases, default } => {
-                let mut switch_arms: Vec<Irep> = vec![];
+                let mut switch_arms: Vec<Irep, _> = Vec::new_in(arena);
                 for c in cases {
-                    switch_arms.push(c.to_irep(mm));
+                    switch_arms.push(c.to_irep(mm, arena));
                 }
 
-                // cases.iter().map(|x| x.to_irep(mm)).collect();
+                // cases.iter().map(|x| x.to_irep(mm, arena)).collect();
                 if default.is_some() {
-                    switch_arms.push(switch_default_irep(default.as_ref().unwrap(), mm));
+                    switch_arms.push(switch_default_irep(default.as_ref().unwrap(), mm, arena));
                 }
-                code_irep(
-                    IrepId::Switch,
-                    vec![control.to_irep(mm), code_irep(IrepId::Block, switch_arms)],
-                )
+
+                ops.extend([control.to_irep(mm, arena), code_irep(IrepId::Block, switch_arms)]);
+                code_irep(IrepId::Switch, ops)
             }
             StmtBody::While { cond, body } => {
-                code_irep(IrepId::While, vec![cond.to_irep(mm), body.to_irep(mm)])
+                ops.extend([cond.to_irep(mm, arena), body.to_irep(mm, arena)]);
+                code_irep(IrepId::While, ops)
             }
         }
     }
 }
 
 impl ToIrep for SwitchCase {
-    fn to_irep(&self, mm: &MachineModel) -> Irep {
-        code_irep(IrepId::SwitchCase, vec![self.case().to_irep(mm), self.body().to_irep(mm)])
-            .with_location(self.body().location(), mm)
+    fn to_irep<'i>(&'i self, mm: &MachineModel, arena: &'i bumpalo::Bump) -> Irep<'i> {
+        let mut ops = Vec::new_in(arena);
+        ops.extend([self.case().to_irep(mm, arena), self.body().to_irep(mm, arena)]);
+        code_irep(IrepId::SwitchCase, ops).with_location(self.body().location(), mm, arena)
     }
 }
 
@@ -613,7 +736,7 @@ impl ToIrep for Lambda {
             .iter()
             .enumerate()
             .map(|(index, param)| {
-                let ty_rep = param.typ().to_irep(mm);
+                let ty_rep = param.typ().to_irep(mm, arena);
                 (
                     Irep::symbol(
                         param.identifier().unwrap_or_else(|| format!("_modifies_{index}").into()),
@@ -625,12 +748,12 @@ impl ToIrep for Lambda {
             .unzip();
         let typ = Irep {
             id: IrepId::MathematicalFunction,
-            sub: vec![Irep::just_sub(types), self.body.typ().to_irep(mm)],
+            sub: vec![Irep::just_sub(types), self.body.typ().to_irep(mm, arena)],
             named_sub: Default::default(),
         };
         Irep {
             id: IrepId::Lambda,
-            sub: vec![Irep::tuple(ops_ireps), self.body.to_irep(mm)],
+            sub: vec![Irep::tuple(ops_ireps), self.body.to_irep(mm, arena)],
             named_sub: linear_map!((IrepId::Type, typ)),
         }
     }
@@ -638,11 +761,11 @@ impl ToIrep for Lambda {
 
 impl goto_program::Symbol {
     pub fn to_irep(&self, mm: &MachineModel) -> super::Symbol {
-        let mut typ = self.typ.to_irep(mm);
+        let mut typ = self.typ.to_irep(mm, arena);
         if let Some(contract) = &self.contract {
             typ = typ.with_named_sub(
                 IrepId::CSpecAssigns,
-                Irep::just_sub(contract.assigns.iter().map(|req| req.to_irep(mm)).collect()),
+                Irep::just_sub(contract.assigns.iter().map(|req| req.to_irep(mm, arena)).collect()),
             );
         }
         if self.is_static_const {
@@ -652,11 +775,11 @@ impl goto_program::Symbol {
         super::Symbol {
             typ,
             value: match &self.value {
-                SymbolValues::Expr(e) => e.to_irep(mm),
-                SymbolValues::Stmt(s) => s.to_irep(mm),
-                SymbolValues::None => Irep::nil(),
+                SymbolValues::Expr(e) => e.to_irep(mm, arena),
+                SymbolValues::Stmt(s) => s.to_irep(mm, arena),
+                SymbolValues::None => Irep::nil(arena),
             },
-            location: self.location.to_irep(mm),
+            location: self.location.to_irep(mm, arena),
             // Unique identifier, same as key in symbol table `foo::x`
             name: self.name,
             // Only used by verilog
@@ -697,7 +820,7 @@ impl goto_program::SymbolTable {
         let mm = self.machine_model();
         let mut st = super::SymbolTable::new();
         for (_key, value) in self.iter() {
-            st.insert(value.to_irep(mm))
+            st.insert(value.to_irep(mm, arena))
         }
         st
     }
@@ -711,14 +834,14 @@ impl ToIrep for Type {
                 let size = Expr::int_constant(*size, Type::ssize_t());
                 Irep {
                     id: IrepId::Array,
-                    sub: vec![typ.to_irep(mm)],
-                    named_sub: linear_map![(IrepId::Size, size.to_irep(mm))],
+                    sub: vec![typ.to_irep(mm, arena)],
+                    named_sub: linear_map![(IrepId::Size, size.to_irep(mm, arena))],
                 }
             }
             //TODO make from_irep that matches this.
             Type::CBitField { typ, width } => Irep {
                 id: IrepId::CBitField,
-                sub: vec![typ.to_irep(mm)],
+                sub: vec![typ.to_irep(mm, arena)],
                 named_sub: linear_map![(IrepId::Width, Irep::just_int_id(*width))],
             },
             Type::Bool => Irep::just_id(IrepId::Bool),
@@ -758,9 +881,9 @@ impl ToIrep for Type {
                 named_sub: linear_map![
                     (
                         IrepId::Parameters,
-                        Irep::just_sub(parameters.iter().map(|x| x.to_irep(mm)).collect()),
+                        Irep::just_sub(parameters.iter().map(|x| x.to_irep(mm, arena)).collect()),
                     ),
-                    (IrepId::ReturnType, return_type.to_irep(mm)),
+                    (IrepId::ReturnType, return_type.to_irep(mm, arena)),
                 ],
             },
             Type::Constructor => Irep::just_id(IrepId::Constructor),
@@ -780,8 +903,8 @@ impl ToIrep for Type {
                 let size = Type::ssize_t().zero();
                 Irep {
                     id: IrepId::Array,
-                    sub: vec![typ.to_irep(mm)],
-                    named_sub: linear_map![(IrepId::Size, size.to_irep(mm))],
+                    sub: vec![typ.to_irep(mm, arena)],
+                    named_sub: linear_map![(IrepId::Size, size.to_irep(mm, arena))],
                 }
             }
             Type::Float => Irep {
@@ -837,14 +960,14 @@ impl ToIrep for Type {
                 let infinity = Irep::just_id(IrepId::Infinity).with_type(&Type::ssize_t(), mm);
                 Irep {
                     id: IrepId::Array,
-                    sub: vec![typ.to_irep(mm)],
+                    sub: vec![typ.to_irep(mm, arena)],
                     named_sub: linear_map![(IrepId::Size, infinity)],
                 }
             }
             Type::Integer => Irep::just_id(IrepId::Integer),
             Type::Pointer { typ } => Irep {
                 id: IrepId::Pointer,
-                sub: vec![typ.to_irep(mm)],
+                sub: vec![typ.to_irep(mm, arena)],
                 named_sub: linear_map![(IrepId::Width, Irep::just_int_id(mm.pointer_width),)],
             },
             Type::Signedbv { width } => Irep {
@@ -859,7 +982,7 @@ impl ToIrep for Type {
                     (IrepId::Tag, Irep::just_string_id(tag.to_string())),
                     (
                         IrepId::Components,
-                        Irep::just_sub(components.iter().map(|x| x.to_irep(mm)).collect()),
+                        Irep::just_sub(components.iter().map(|x| x.to_irep(mm, arena)).collect()),
                     ),
                 ],
             },
@@ -872,7 +995,7 @@ impl ToIrep for Type {
                 )],
             },
             Type::TypeDef { name, typ } => typ
-                .to_irep(mm)
+                .to_irep(mm, arena)
                 .with_named_sub(IrepId::CTypedef, Irep::just_string_id(name.to_string())),
 
             Type::Union { tag, components } => Irep {
@@ -882,7 +1005,7 @@ impl ToIrep for Type {
                     (IrepId::Tag, Irep::just_string_id(tag.to_string())),
                     (
                         IrepId::Components,
-                        Irep::just_sub(components.iter().map(|x| x.to_irep(mm)).collect()),
+                        Irep::just_sub(components.iter().map(|x| x.to_irep(mm, arena)).collect()),
                     ),
                 ],
             },
@@ -905,18 +1028,18 @@ impl ToIrep for Type {
                 named_sub: linear_map![
                     (
                         IrepId::Parameters,
-                        Irep::just_sub(parameters.iter().map(|x| x.to_irep(mm)).collect())
+                        Irep::just_sub(parameters.iter().map(|x| x.to_irep(mm, arena)).collect())
                             .with_named_sub(IrepId::Ellipsis, Irep::one()),
                     ),
-                    (IrepId::ReturnType, return_type.to_irep(mm)),
+                    (IrepId::ReturnType, return_type.to_irep(mm, arena)),
                 ],
             },
             Type::Vector { typ, size } => {
                 let size = Expr::int_constant(*size, Type::ssize_t());
                 Irep {
                     id: IrepId::Vector,
-                    sub: vec![typ.to_irep(mm)],
-                    named_sub: linear_map![(IrepId::Size, size.to_irep(mm))],
+                    sub: vec![typ.to_irep(mm, arena)],
+                    named_sub: linear_map![(IrepId::Size, size.to_irep(mm, arena))],
                 }
             }
         }

@@ -6,10 +6,10 @@ use crate::InternedString;
 /// <https://github.com/diffblue/cbmc/blob/develop/src/util/symbol.h>
 // TODO: do we want these members to be public?
 #[derive(Clone, Debug, PartialEq)]
-pub struct Symbol {
-    pub typ: Irep,
-    pub value: Irep,
-    pub location: Irep,
+pub struct Symbol<'i> {
+    pub typ: Irep<'i>,
+    pub value: Irep<'i>,
+    pub location: Irep<'i>,
     /// Unique identifier, same as key in symbol table `foo::x`
     pub name: InternedString,
     /// Only used by verilog
