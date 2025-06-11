@@ -8,7 +8,7 @@ use crate::cbmc_string::InternedString;
 use crate::utils::NumUtils;
 use num::bigint::{BigInt, BigUint, Sign};
 
-use std::fmt::Display;
+use std::borrow::Cow;
 
 #[derive(PartialEq, Eq, PartialOrd, Ord, Clone, Debug)]
 pub enum IrepId {
@@ -878,22 +878,34 @@ impl IrepId {
     }
 }
 
-impl Display for IrepId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            IrepId::FreeformString(s) => {
-                return write!(f, "{s}");
-            }
-            IrepId::FreeformInteger(i) => {
-                return write!(f, "{i}");
-            }
-            IrepId::FreeformBitPattern(i) => {
-                return write!(f, "{i:X}");
-            }
-            _ => {}
-        }
+// Implementing `ToString` rather than `Display` because display only has the interface
+// to write to a formatter which seems to be slower when you just need the string.
+#[allow(clippy::to_string_trait_impl)]
+impl ToString for IrepId {
+    fn to_string(&self) -> String {
+        self.to_string_cow().into_owned()
+    }
+}
 
-        let s = match self {
+impl IrepId {
+    pub fn to_string_cow(&self) -> Cow<'_, str> {
+        match self.to_owned_string() {
+            Some(owned) => Cow::Owned(owned),
+            None => Cow::Borrowed(self.to_static_string()),
+        }
+    }
+
+    fn to_owned_string(&self) -> Option<String> {
+        match self {
+            IrepId::FreeformString(s) => Some(s.to_string()),
+            IrepId::FreeformInteger(i) => Some(i.to_string()),
+            IrepId::FreeformBitPattern(i) => Some(format!("{i:X}")),
+            _ => None,
+        }
+    }
+
+    fn to_static_string(&self) -> &'static str {
+        match self {
             IrepId::FreeformString(_)
             | IrepId::FreeformInteger(_)
             | IrepId::FreeformBitPattern { .. } => unreachable!(),
@@ -1721,8 +1733,7 @@ impl Display for IrepId {
             IrepId::VectorLt => "vector-<",
             IrepId::FloatbvRoundToIntegral => "floatbv_round_to_integral",
             IrepId::ShuffleVector => "shuffle_vector",
-        };
-        write!(f, "{s}")
+        }
     }
 }
 
