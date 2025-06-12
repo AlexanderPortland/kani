@@ -4,6 +4,7 @@
 #![feature(exit_status_error)]
 
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::{
     process::{Command, Stdio},
     time::Duration,
@@ -11,37 +12,42 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-const WARMUP_RUNS: usize = 2; // should be at least one for initial extern crate business
+/// We need at least one warm-up run to make sure crates are fetched & cached in 
+/// the local `.cargo/registry` folder. Otherwise the first run will be unduly slower.
+const WARMUP_RUNS: usize = 1;
 const TIMED_RUNS: usize = 10;
 
 fn main() {
-    // println!("Doing {WARMUP_RUNS} warm up runs");
-    let warmup_results = (0..WARMUP_RUNS)
-        .map(|i| {
-            print!("running warmup {}/{WARMUP_RUNS}", i + 1);
-            let _ = std::io::stdout().flush();
-            let res = run_command();
-            println!(" -- {res:?}");
-            res
-        })
-        .collect::<Vec<_>>();
+    let current = std::env::current_dir().expect("should be run in a directory");
+    let mut to_visit = vec![current];
+    // let mut res = Vec::new();
 
-    let timed_results = (0..TIMED_RUNS)
-        .map(|i| {
-            print!("running timed run {}/{TIMED_RUNS}", i + 1);
-            let _ = std::io::stdout().flush();
-            let res = run_command();
-            println!(" -- {res:?}");
-            res
-        })
-        .collect::<Vec<_>>();
+    while let Some(next) = to_visit.pop() {
+        let p = next.canonicalize().unwrap();
+        let toml = next.canonicalize().unwrap().join("Cargo.toml");
+        dbg!(&toml);
+        // println!("p is {p:?} next is {next:?}");
 
-    let aggr = aggregate_results(&timed_results);
-    println!("results are in! {aggr:?}");
-
-    let _sniff = sniff_test(&warmup_results, &timed_results, &aggr);
-
-    print_to_file(&aggr);
+        if toml.exists() && toml.is_file() {
+            // in rust directory so we profile that jawn
+            println!("profile in {:?}", next);
+            profile_on_crate(next);
+        } else {
+            let a = std::fs::read_dir(next)
+                .unwrap()
+                .filter_map(|entry| match entry {
+                    Err(_) => None,
+                    Ok(entry) => {
+                        let path = entry.path();
+                        if path.is_dir() {
+                            Some(path)
+                        } else { None }
+                    }
+                }).collect::<Vec<_>>();
+            // println!("recurr in {:?}", a);
+            to_visit.extend(a);
+        }
+    }
 }
 
 fn print_to_file(aggr: &AggrInfo) {
@@ -56,10 +62,38 @@ fn print_to_file(aggr: &AggrInfo) {
     f.write(s.as_bytes()).unwrap();
 }
 
+fn profile_on_crate(absolute_path: std::path::PathBuf) -> AggrInfo {
+    let _warmup_results = (0..WARMUP_RUNS)
+        .map(|i| {
+            print!("running warmup {}/{WARMUP_RUNS}", i + 1);
+            let _ = std::io::stdout().flush();
+            let res = run_command_in(&absolute_path);
+            println!(" -- {res:?}");
+            res
+        })
+        .collect::<Vec<_>>();
+
+    let timed_results = (0..TIMED_RUNS)
+        .map(|i| {
+            print!("running timed run {}/{TIMED_RUNS}", i + 1);
+            let _ = std::io::stdout().flush();
+            let res = run_command_in(&absolute_path);
+            println!(" -- {res:?}");
+            res
+        })
+        .collect::<Vec<_>>();
+
+    let aggr = aggregate_results(&timed_results);
+    println!("results for {absolute_path:?} are in! {aggr:?}");
+
+    aggr
+}
+
 type RunResult = Duration;
-fn run_command() -> RunResult {
+fn run_command_in(absolute_path: &PathBuf) -> RunResult {
     // `cargo clean` to ensure the compiler is run again
     let _ = Command::new("cargo")
+        .current_dir(absolute_path)
         .arg("clean")
         .stdout(Stdio::null())
         .output()
@@ -67,6 +101,7 @@ fn run_command() -> RunResult {
 
     // do the actual run
     let kani_output = Command::new("cargo")
+        .current_dir(absolute_path)
         .arg("kani")
         .arg("--only-codegen")
         .env("TIME_COMPILER", "true")
