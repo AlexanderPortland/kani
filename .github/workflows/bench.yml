@@ -14,6 +14,69 @@ on:
   workflow_call:
 
 jobs:
+  alexs-fake-benchcomp:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Save push event HEAD and HEAD~ to environment variables
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          echo "NEW_REF=${{ github.event.after}}" | tee -a "$GITHUB_ENV"
+          echo "OLD_REF=${{ github.event.before }}" | tee -a "$GITHUB_ENV"
+
+      - name: Save pull request HEAD and base to environment variables
+        if: ${{ contains(fromJSON('["pull_request", "pull_request_target"]'), github.event_name) }}
+        run: |
+          echo "OLD_REF=${{ github.event.pull_request.base.sha }}" | tee -a "$GITHUB_ENV"
+          echo "NEW_REF=${{ github.event.pull_request.head.sha }}" | tee -a "$GITHUB_ENV"
+
+      - name: Check out Kani (old variant)
+        uses: actions/checkout@v4
+        with:
+          path: ./old
+          ref: ${{ env.OLD_REF }}
+          fetch-depth: 2
+
+      - name: Check out Kani (new variant)
+        uses: actions/checkout@v4
+        with:
+          path: ./new
+          ref: ${{ env.NEW_REF }}
+          fetch-depth: 1
+
+      - name: Set up Kani Dependencies (old variant)
+        uses: ./old/.github/actions/setup
+        with:
+          os: ubuntu-24.04
+          kani_dir: old
+
+      - name: Set up Kani Dependencies (new variant)
+        uses: ./new/.github/actions/setup
+        with:
+          os: ubuntu-24.04
+          kani_dir: new
+
+      - name: Copy benchmarks from new to old
+        run: rm -rf ./old/tests/perf ; cp -r ./new/tests/perf ./old/tests/
+      
+      - name: Build `compile-timer` in old
+        run: cd old/tools/compile-timer && cargo build --release
+      - name: Build `compile-timer` in new
+        run: cd new/tools/compile-timer && cargo build --release
+
+      - name: Run `compile-timer` on old
+        run: cd old && ./target/release/compile-timer --out-path compile-times-old.json
+        with:
+          os: ubuntu-24.04
+          kani_dir: old
+      - name: Run `compile-timer` on new
+        run: cd new && ./target/release/compile-timer --out-path compile-times-new.json
+        with:
+          os: ubuntu-24.04
+          kani_dir: new
+
+      - name: Run analysis between the two
+        run: ./old/target/release/compile-analyzer --path-pre old/compile-times-old.json --path-post new/compile-times-new.json --only-markdown >> "$GITHUB_STEP_SUMMARY"
+    
   perf-benchcomp:
     runs-on: ubuntu-24.04
     steps:

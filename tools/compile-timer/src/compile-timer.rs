@@ -67,13 +67,16 @@ fn main() {
                     Err(_) => None,
                     Ok(entry) => {
                         let path = entry.path();
-                        if path.is_dir() { 
-                            if args.ignore.iter().any(|i|path.ends_with(i)) {
-                                println!("path {:?} is ignored", path);
+                        if path.is_dir() {
+                            if args.ignore.iter().any(|i| path.ends_with(i)) {
+                                println!("path {path:?} is ignored");
                                 None
-                            } else { Some(path) }
-                            
-                        } else { None }
+                            } else {
+                                Some(path)
+                            }
+                        } else {
+                            None
+                        }
                     }
                 })
                 .collect::<Vec<_>>();
