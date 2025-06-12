@@ -37,6 +37,14 @@ impl AggrInfo {
     pub fn new(iqr: Stats, full: Stats) -> Self {
         AggrInfo { iqr, full }
     }
+
+    pub fn std_dev(&self) -> Duration {
+        self.full.std_dev
+    }
+
+    pub fn iqr(&self) -> Duration {
+        self.iqr.range.1 - self.iqr.range.0
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize)]

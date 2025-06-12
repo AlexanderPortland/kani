@@ -11,8 +11,17 @@ use std::{
     time::Duration,
 };
 
+#[derive(Debug, Parser)]
+#[command(version, about, long_about = None)]
+struct TimerArgs {
+    /// Sets a custom config file
+    #[arg(short, long, value_name = "FILE")]
+    out_path: PathBuf,
+}
+
 mod common;
 
+use clap::Parser;
 use common::AggrInfo;
 use serde::Serialize;
 
@@ -24,11 +33,13 @@ const WARMUP_RUNS: usize = 1;
 const TIMED_RUNS: usize = 10;
 
 fn main() {
+    let args = TimerArgs::parse();
+
     let current = std::env::current_dir().expect("should be run in a directory");
     let mut to_visit = vec![current];
     let mut res = Vec::new();
     let run_start = std::time::Instant::now();
-    let out_file = File::create("compile-timer.json").unwrap();
+    let out_file = File::create(args.out_path).unwrap();
     let mut out_ser = serde_json::Serializer::pretty(out_file);
 
     while let Some(next) = to_visit.pop() {
