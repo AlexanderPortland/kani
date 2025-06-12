@@ -11,7 +11,12 @@ use std::{
     time::Duration,
 };
 
-use serde::{Deserialize, Serialize};
+mod common;
+
+use common::AggrInfo;
+use serde::Serialize;
+
+use crate::common::{AggrResult, Stats, aggregate_aggregates};
 
 /// We need at least one warm-up run to make sure crates are fetched & cached in
 /// the local `.cargo/registry` folder. Otherwise the first run will be unduly slower.
@@ -23,7 +28,8 @@ fn main() {
     let mut to_visit = vec![current];
     let mut res = Vec::new();
     let run_start = std::time::Instant::now();
-    let mut out_file = File::create("compile-timer.json").unwrap();
+    let out_file = File::create("compile-timer.json").unwrap();
+    let mut out_ser = serde_json::Serializer::pretty(out_file);
 
     while let Some(next) = to_visit.pop() {
         let _p = next.canonicalize().unwrap();
@@ -35,8 +41,7 @@ fn main() {
             // in rust directory so we profile that jawn
             println!("[!] profiling in {next:?}");
             let new_res = profile_on_crate(&next).into_result(next);
-            out_file.write_all(serde_json::to_string_pretty(&new_res).unwrap().as_bytes()).unwrap();
-            out_file.write_all("\n".as_bytes()).unwrap();
+            new_res.serialize(&mut out_ser).unwrap();
             res.push(new_res);
         } else {
             let a = std::fs::read_dir(next)
@@ -54,26 +59,10 @@ fn main() {
         }
     }
 
-    println!("[!] total info is {:?}", aggregate_aggregates(&res));
+    let final_info = aggregate_aggregates(&res);
+    println!("[!] total info is {final_info:?}");
+    // println!("");
     print!("\t [*] run took {:?}", run_start.elapsed());
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct AggrResult {
-    pub krate: String,
-    info: AggrInfo,
-}
-
-fn _print_to_file(aggr: &AggrInfo) {
-    let mut f = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .open("out.txt")
-        .unwrap();
-
-    let s = serde_json::to_string_pretty(&aggr).unwrap();
-    f.write_all(s.as_bytes()).unwrap();
 }
 
 fn profile_on_crate(absolute_path: &std::path::PathBuf) -> AggrInfo {
@@ -140,28 +129,6 @@ fn extract_duration(s: &str) -> Duration {
     Duration::from_micros(micros)
 }
 
-fn aggregate_aggregates(info: &[AggrResult]) -> (Duration, Duration) {
-    for i in info {
-        println!("krate {} -- {:?}", i.krate, i.info.iqr.avg);
-    }
-
-    (info.iter().map(|i| i.info.iqr.avg).sum(), info.iter().map(|i| i.info.iqr.std_dev).sum())
-}
-
-#[allow(dead_code)]
-#[derive(Debug, Serialize, Deserialize)]
-struct AggrInfo {
-    pub iqr: Stats,
-    full: Stats,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct Stats {
-    pub avg: Duration,
-    pub std_dev: Duration,
-    pub range: (Duration, Duration),
-}
-
 // enum RunQuality {
 //     VeryGood,
 //     Good,
@@ -180,7 +147,7 @@ impl AggrInfo {
     // }
 
     fn into_result(self, krate: PathBuf) -> AggrResult {
-        AggrResult { krate: format!("{krate:?}"), info: self }
+        AggrResult::new(krate, self)
     }
 
     // fn to_string(&self) -> String {
@@ -204,7 +171,7 @@ fn aggregate_results(results: &[Duration]) -> AggrInfo {
 
     println!("iqr durations are {iqr_durations:?}");
 
-    AggrInfo { iqr: result_stats(&iqr_durations), full: result_stats(results) }
+    AggrInfo::new(result_stats(&iqr_durations), result_stats(results))
 }
 
 fn result_stats(results: &[Duration]) -> Stats {
@@ -217,24 +184,3 @@ fn result_stats(results: &[Duration]) -> Stats {
 
     Stats { avg, std_dev, range }
 }
-
-#[allow(dead_code)]
-enum PotentialIssue {
-    ColdBuildCache,
-}
-
-// fn sniff_test(
-//     warmup_results: &[Duration],
-//     timed_results: &[Duration],
-//     _aggr: &AggrInfo,
-// ) -> Vec<PotentialIssue> {
-//     let issues = Vec::new();
-
-//     println!("warm ups {warmup_results:?}");
-//     println!("timed {timed_results:?}");
-
-//     issues
-// }
-
-#[cfg(test)]
-mod test {}
