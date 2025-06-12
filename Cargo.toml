@@ -32,6 +32,12 @@ path = "src/bin/cargo_kani.rs"
 [profile.release]
 strip = "debuginfo"
 
+[profile.profiling]
+inherits = "release"
+debug = true
+strip = "none"
+lto = "off"
+
 # Below is the workspace (vs above is "kani-verifier" crate) config:
 
 [workspace]
@@ -67,7 +73,6 @@ exclude = [
   "tests/cargo-ui",
   "tests/slow",
   "tests/std-checks",
-  "tests/assess-scan-test-scaffold",
   "tests/script-based-pre",
   "tests/script-based-pre/build-cache-bin/target/new_dep",
   "tests/script-based-pre/build-cache-dirty/target/new_dep",
