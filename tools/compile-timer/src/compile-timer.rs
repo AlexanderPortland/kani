@@ -17,6 +17,9 @@ struct TimerArgs {
     /// Sets a custom config file
     #[arg(short, long, value_name = "FILE")]
     out_path: PathBuf,
+
+    #[arg(short, long)]
+    ignore: Vec<PathBuf>,
 }
 
 mod common;
@@ -34,6 +37,9 @@ const TIMED_RUNS: usize = 10;
 
 fn main() {
     let args = TimerArgs::parse();
+
+    println!("args are {args:?}");
+    // panic!();
 
     let current = std::env::current_dir().expect("should be run in a directory");
     let mut to_visit = vec![current];
@@ -61,7 +67,13 @@ fn main() {
                     Err(_) => None,
                     Ok(entry) => {
                         let path = entry.path();
-                        if path.is_dir() { Some(path) } else { None }
+                        if path.is_dir() { 
+                            if args.ignore.iter().any(|i|path.ends_with(i)) {
+                                println!("path {:?} is ignored", path);
+                                None
+                            } else { Some(path) }
+                            
+                        } else { None }
                     }
                 })
                 .collect::<Vec<_>>();

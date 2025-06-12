@@ -20,9 +20,6 @@ struct AnalyzerArgs {
 
     #[arg(short, long)]
     only_markdown: bool,
-
-    #[arg(short, long)]
-    ignore: Vec<PathBuf>,
 }
 
 fn main() {
