@@ -63,14 +63,8 @@ jobs:
 
       - name: Run `compile-timer` on old
         run: cd old && ./target/release/compile-timer --out-path compile-times-old.json --ignore kani-lib --ignore display_trait --ignore s2n-quic
-        with:
-          os: ubuntu-24.04
-          kani_dir: old
       - name: Run `compile-timer` on new
         run: cd new && ./target/release/compile-timer --out-path compile-times-new.json --ignore kani-lib --ignore display_trait --ignore s2n-quic
-        with:
-          os: ubuntu-24.04
-          kani_dir: new
 
       - name: Run analysis between the two
         run: ./old/target/release/compile-analyzer --path-pre old/compile-times-old.json --path-post new/compile-times-new.json --only-markdown >> "$GITHUB_STEP_SUMMARY"
