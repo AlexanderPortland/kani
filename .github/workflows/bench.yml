@@ -57,7 +57,7 @@ jobs:
           cd old && cargo build-dev --release
           echo "After build, showing all target directories:"
           find . -name target -type d
-          echo "Looking for kani-driver:"
+          echo "Looking for kani-driver:" 
           find . -name kani-driver -type f
       - name: debug prints
         run: ls -la /home/runner/work/kani/kani/old/target && ls -la /home/runner/work/kani/kani/old/target/kani && ls -la /home/runner/work/kani/kani/old/target/kani/bin
