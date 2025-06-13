@@ -10,6 +10,17 @@ REPO_DIR="$(dirname $SCRIPT_DIR)"
 shopt -s nullglob
 KANI_DRIVER="$REPO_DIR/target/kani/bin/kani-driver"
 
+set -eux
+
+echo "File exists test: $(test -f ${KANI_DRIVER} && echo "yes" || echo "no")"
+echo "Executable test: $(test -x ${KANI_DRIVER} && echo "yes" || echo "no")"
+echo "File permissions:"
+ls -la ${KANI_DRIVER}
+echo "File type:"
+file ${KANI_DRIVER}
+echo "Symlink check:"
+readlink -f ${KANI_DRIVER}
+
 if [[ ! -x ${KANI_DRIVER} ]]
 then
     echo "ERROR: Could not find kani-driver binary."
