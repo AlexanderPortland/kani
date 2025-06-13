@@ -23,6 +23,7 @@ echo "Target exists: $(test -d /home/runner/work/kani/kani/old/target && echo "y
 echo "Target/kani exists: $(test -d /home/runner/work/kani/kani/old/target/kani && echo "yes" || echo "no")"
 echo "Target/kani/bin exists: $(test -d /home/runner/work/kani/kani/old/target/kani/bin && echo "yes" || echo "no")"
 
+
 # List contents of the last existing directory in the path
 for dir in "/home/runner/work/kani/kani/old/target/kani/bin" \
            "/home/runner/work/kani/kani/old/target/kani" \
