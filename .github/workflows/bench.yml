@@ -74,7 +74,7 @@ jobs:
       - name: Build `compile-timer` in new
         run: cd new/tools/compile-timer && cargo build --release
       - name: Build `kani` in new
-        run: cd new/tests/perf && cargo build-dev --release
+        run: cd new/tests/perf && cargo build-dev --release 
 
       - name: Run `compile-timer` on new
         run: |
