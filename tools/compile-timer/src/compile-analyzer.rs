@@ -167,7 +167,6 @@ impl Verdict {
 }
 
 fn try_read_files(c: &AnalyzerArgs) -> io::Result<(File, File)> {
-    println!("reading from ({:?}, {:?})", c.path_pre.canonicalize()?, c.path_post.canonicalize()?);
     io::Result::Ok((
         File::open(c.path_pre.canonicalize()?)?, 
         File::open(c.path_post.canonicalize()?)?

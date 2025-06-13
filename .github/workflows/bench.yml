@@ -78,12 +78,12 @@ jobs:
       - name: Run `compile-timer` on old
         run: |
           export PATH="${{ github.workspace }}/old/scripts:$PATH"
-          cd old/tests/perf && ../../target/release/compile-timer --out-path compile-times-old.json --ignore kani-lib --ignore display_trait --ignore s2n-quic --ignore hashset --ignore misc --ignore vec
+          cd old/tests/perf && ../../target/release/compile-timer --out-path compile-times-old.json --ignore kani-lib --ignore display_trait --ignore s2n-quic
 
       - name: Run `compile-timer` on new
         run: |
           export PATH="${{ github.workspace }}/new/scripts:$PATH"
-          cd new/tests/perf && ../../target/release/compile-timer --out-path compile-times-new.json --ignore kani-lib --ignore display_trait --ignore s2n-quic --ignore hashset --ignore misc --ignore vec
+          cd new/tests/perf && ../../target/release/compile-timer --out-path compile-times-new.json --ignore kani-lib --ignore display_trait --ignore s2n-quic
 
       - name: Run analysis between the two
         run: ./new/target/release/compile-analyzer --path-pre old/tests/perf/compile-times-old.json --path-post new/tests/perf/compile-times-new.json --only-markdown >> "$GITHUB_STEP_SUMMARY"
