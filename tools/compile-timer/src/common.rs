@@ -8,10 +8,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AggrResult {
     pub krate: PathBuf,
+    pub krate_trimmed_path: String,
     /// the stats for only the 25th-75th percentile of runs on this crate
     pub iqr_stats: Stats,
     // the stats for all runs on this crate
     full_stats: Stats,
+}
+
+fn krate_trimmed_path(krate: &PathBuf) -> String {
+    format!(
+        "{:?}",
+        krate.strip_prefix(std::env::current_dir().unwrap().parent().unwrap()).unwrap()
+    )
 }
 
 #[allow(dead_code)]
@@ -19,14 +27,7 @@ pub struct AggrResult {
 // don't seem to count that we use them there...
 impl AggrResult {
     pub fn new(krate: PathBuf, iqr_stats: Stats, full_stats: Stats) -> Self {
-        AggrResult { krate, iqr_stats, full_stats }
-    }
-
-    pub fn krate_trimmed_path(&self) -> String {
-        format!(
-            "{:?}",
-            self.krate.strip_prefix(std::env::current_dir().unwrap().parent().unwrap()).unwrap()
-        )
+        AggrResult { krate_trimmed_path: krate_trimmed_path(&krate), krate, iqr_stats, full_stats }
     }
 
     pub fn full_std_dev(&self) -> Duration {
