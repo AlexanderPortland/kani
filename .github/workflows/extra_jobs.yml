@@ -21,6 +21,9 @@ name: Kani Extra
 on:
   pull_request_target:
   merge_group:
+  push:
+    branches:
+      - 'main'
 
 jobs:
   # Keep this job minimal since it requires extra permission
