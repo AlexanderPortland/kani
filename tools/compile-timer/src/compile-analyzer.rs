@@ -78,13 +78,14 @@ fn print_to_terminal(results: &[(AggrResult, AggrResult)]) {
 
 // Print results in a markdown format (for GitHub actions).
 fn print_markdown(results: &[(AggrResult, AggrResult)]) {
+    println!("results {results:?}");
+    
     println!("# Compiletime Results");
     let total_pre = results.iter().map(|i|i.0.iqr_stats.avg).sum();
     let total_post = results.iter().map(|i|i.1.iqr_stats.avg).sum();
     println!("### *on the whole: {:.2?} => {:.2?} -- {} *", total_pre, total_post, diff_string(total_pre, total_post));
     println!("| test crate | old compile time | new compile time | diff | verdict |");
     println!("| - | - | - | - | - |");
-    println!("results {results:?}");
     for (pre_res, post_res) in results {
         assert!(pre_res.krate_trimmed_path == post_res.krate_trimmed_path);
         let pre_time = pre_res.iqr_stats.avg;
