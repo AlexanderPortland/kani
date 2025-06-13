@@ -14,23 +14,26 @@ set -eux
 
 echo "Current working directory: $(pwd)"
 echo "Full path we're checking: ${KANI_DRIVER}"
-echo "Directory contents:"
-ls -la "$(dirname ${KANI_DRIVER})"
-echo "Parent directory contents:"
-ls -la "$(dirname $(dirname ${KANI_DRIVER}))"
-echo "Full directory tree:"
-tree "$(dirname $(dirname $(dirname ${KANI_DRIVER})))"
 
-# Try both absolute and relative paths
-ABSOLUTE_PATH="$(readlink -f ${KANI_DRIVER})"
-echo "Absolute path: ${ABSOLUTE_PATH}"
-echo "File exists test (absolute): $(test -f "${ABSOLUTE_PATH}" && echo "yes" || echo "no")"
+# Check each directory level exists
+echo "Checking directory structure:"
+echo "Root exists: $(test -d /home/runner/work/kani/kani && echo "yes" || echo "no")"
+echo "Old exists: $(test -d /home/runner/work/kani/kani/old && echo "yes" || echo "no")"
+echo "Target exists: $(test -d /home/runner/work/kani/kani/old/target && echo "yes" || echo "no")"
+echo "Target/kani exists: $(test -d /home/runner/work/kani/kani/old/target/kani && echo "yes" || echo "no")"
+echo "Target/kani/bin exists: $(test -d /home/runner/work/kani/kani/old/target/kani/bin && echo "yes" || echo "no")"
 
-# Check if we can find the file anywhere in the workspace
-echo "Finding all kani-driver files:"
-find "${GITHUB_WORKSPACE}" -name "kani-driver" -type f
-
-
+# List contents of the last existing directory in the path
+for dir in "/home/runner/work/kani/kani/old/target/kani/bin" \
+           "/home/runner/work/kani/kani/old/target/kani" \
+           "/home/runner/work/kani/kani/old/target" \
+           "/home/runner/work/kani/kani/old"; do
+    if [[ -d "$dir" ]]; then
+        echo "Contents of $dir:"
+        ls -la "$dir"
+        break
+    fi
+done
 
 
 if [[ ! -x ${KANI_DRIVER} ]]
