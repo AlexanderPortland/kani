@@ -111,14 +111,14 @@ fn signed_percent_diff(pre: &Duration, post: &Duration) -> f64 {
 
 fn diff_string(pre: Duration, post: Duration) -> String {
     let change_dir = if post > pre {
-            "<style type=\"text/css\">{color:green;}↑{color:red;}"
+            "\\color{red}{↑"
         } else if post == pre {
-            "-"
+            "\\color{black}{-"
         } else {
-            "<style type=\"text/css\">{color:red;}↓{color:green;}"
+            "\\color{green}{↓"
         };
     let change_amount = signed_percent_diff(&pre, &post).abs();
-    format!("{change_dir} {:.2?} ({change_amount:.2}%) </style>", pre.abs_diff(post))
+    format!("{change_dir} {:.2?} ({change_amount:.2}%)}}", pre.abs_diff(post))
 }
 
 #[derive(Debug)]
