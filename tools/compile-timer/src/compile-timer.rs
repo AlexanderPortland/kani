@@ -41,8 +41,8 @@ fn main() {
     let mut to_visit = vec![current];
     let mut res = Vec::new();
     let run_start = std::time::Instant::now();
+    let mut out_ser = serde_json::Serializer::pretty(File::create(&args.out_path).unwrap());
     println!("outputting to file {:?}", args.out_path.canonicalize().unwrap());
-    let mut out_ser = serde_json::Serializer::pretty(File::create(args.out_path.canonicalize().unwrap()).unwrap());
 
     while let Some(next) = to_visit.pop() {
         let path_to_toml = next.canonicalize().unwrap().join("Cargo.toml");
@@ -149,6 +149,7 @@ fn extract_duration(s: &str) -> Duration {
 fn aggregate_results(path: &PathBuf, results: &[Duration]) -> AggrResult {
     assert!(results.len() == TIMED_RUNS);
 
+    // sort and calculate the subset of times in the interquartile range
     let mut sorted = results.to_vec();
     sorted.sort();
     let iqr_bounds = (0.25 * results.len() as f64, 0.75 * results.len() as f64);
