@@ -59,6 +59,8 @@ jobs:
       - name: Run `compile-timer` on old
         run: |
           export PATH="${{ github.workspace }}/old/scripts:$PATH"
+          ls -la /home/runner/work/kani/kani/old/target/kani/bin
+          ls -la /home/runner/work/kani/kani/old/target/kani/bin/kani-driver
           cd old && ./target/release/compile-timer --out-path compile-times-old.json --ignore kani-lib --ignore display_trait --ignore s2n-quic
       
       - name: Set up Kani Dependencies (new variant)
