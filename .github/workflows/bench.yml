@@ -47,12 +47,6 @@ jobs:
           os: ubuntu-24.04
           kani_dir: old
 
-      - name: Set up Kani Dependencies (new variant)
-        uses: ./new/.github/actions/setup
-        with:
-          os: ubuntu-24.04
-          kani_dir: new
-
       - name: Copy benchmarks from new to old
         run: rm -rf ./old/tests/perf ; cp -r ./new/tests/perf ./old/tests/
 
@@ -60,16 +54,21 @@ jobs:
         run: cd old/tools/compile-timer && cargo build --release
       - name: Build `kani` in old
         run: cd old && cargo build --release
+      - name: Run `compile-timer` on old
+        run: |
+          export PATH="${{ github.workspace }}/old/scripts:$PATH"
+          cd old && ./target/release/compile-timer --out-path compile-times-old.json --ignore kani-lib --ignore display_trait --ignore s2n-quic
       
+      - name: Set up Kani Dependencies (new variant)
+        uses: ./new/.github/actions/setup
+        with:
+          os: ubuntu-24.04
+          kani_dir: new
       - name: Build `compile-timer` in new
         run: cd new/tools/compile-timer && cargo build --release
       - name: Build `kani` in new
         run: cd new && cargo build --release
 
-      - name: Run `compile-timer` on old
-        run: |
-          export PATH="${{ github.workspace }}/old/scripts:$PATH"
-          cd old && ./target/release/compile-timer --out-path compile-times-old.json --ignore kani-lib --ignore display_trait --ignore s2n-quic
       - name: Run `compile-timer` on new
         run: |
           export PATH="${{ github.workspace }}/new/scripts:$PATH"
