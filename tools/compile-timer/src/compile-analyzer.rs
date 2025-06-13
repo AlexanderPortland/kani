@@ -81,6 +81,7 @@ fn print_markdown(results: &[(AggrResult, AggrResult)]) {
     println!("# Compiletime Results");
     println!("| test crate | old compile time | new compile time | diff | verdict |");
     println!("| - | - | - | - | - |");
+    println!("results {results:?}");
     for (pre_res, post_res) in results {
         assert!(pre_res.krate == post_res.krate);
         let pre_time = pre_res.iqr_stats.avg;
