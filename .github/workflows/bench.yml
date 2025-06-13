@@ -89,7 +89,7 @@ jobs:
       - name: Run analysis between the two
         run: |
           cat old/tests/perf/compile-times-old.json
-          cat new/tests/perf/compile-times-old.json
+          cat new/tests/perf/compile-times-new.json
           ./new/target/release/compile-analyzer --path-pre old/tests/perf/compile-times-old.json --path-post new/tests/perf/compile-times-new.json --only-markdown >> "$GITHUB_STEP_SUMMARY"
   # perf-benchcomp: 
   #   runs-on: ubuntu-24.04
