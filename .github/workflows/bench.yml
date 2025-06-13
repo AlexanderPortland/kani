@@ -58,10 +58,6 @@ jobs:
       - name: Build `kani` in old
         run: |
           cd old && cargo build-dev --release
-# echo "After build, showing all target directories:"
-# find . -name target -type d
-# echo "Looking for kani-driver:" 
-# find . -name kani-driver -type f
       
       - name: Run `compile-timer` on old
         run: |
