@@ -1,6 +1,6 @@
 // Copyright Kani Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-use std::{cmp::max, fs::File, io, path::PathBuf, time::Duration, u32};
+use std::{cmp::max, fs::File, io, path::PathBuf, time::Duration};
 
 use clap::Parser;
 mod common;
@@ -33,7 +33,7 @@ fn main() {
     let post_results = post_ser.into_iter::<AggrResult>().collect::<Vec<_>>();
 
     let mut results = pre_results.into_iter().filter_map(Result::ok).zip(post_results.into_iter().filter_map(Result::ok)).collect::<Vec<_>>();
-    results.sort_by_key(|a| -signed_percent_diff(&a.0.iqr_stats.avg, &a.1.iqr_stats.avg) as i64);
+    results.sort_by_key(|a| signed_percent_diff(&a.0.iqr_stats.avg, &a.1.iqr_stats.avg).abs() as i64);
 
     if c.only_markdown {
         print_markdown(results.as_slice());
