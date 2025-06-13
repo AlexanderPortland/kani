@@ -37,9 +37,6 @@ const TIMED_RUNS: usize = 10;
 fn main() {
     let args = TimerArgs::parse();
 
-    println!("args are {args:?}");
-    // panic!();
-
     let current = std::env::current_dir().expect("should be run in a directory");
     let mut to_visit = vec![current];
     let mut res = Vec::new();
@@ -57,13 +54,13 @@ fn main() {
             new_res.serialize(&mut out_ser).unwrap();
             res.push(new_res); 
         } else {
-            // we want want to recurr and visit all directories that aren't explicitly ignored
+            // we want want to recur and visit all directories that aren't explicitly ignored
             to_visit.extend(std::fs::read_dir(next)
                 .unwrap()
                 .filter_map(|entry| {
                     if let Ok(entry) = entry {
                         let path = entry.path();
-                        if path.is_dir() && args.ignore.iter().any(|ignored| path.ends_with(ignored)) {
+                        if path.is_dir() && !args.ignore.iter().any(|ignored| path.ends_with(ignored)) {
                             return Some(path);
                         }
                     }
@@ -78,6 +75,8 @@ fn main() {
     print!("\t [*] run took {:?}", run_start.elapsed());
 }
 
+// Profile a crate by running a certain number of untimed warmup runs and then
+// a certain number of timed runs, returning aggregates of the timing results.
 fn profile_on_crate(absolute_path: &std::path::PathBuf) -> AggrResult {
     let _warmup_results = (0..WARMUP_RUNS)
         .map(|i| {
@@ -106,6 +105,8 @@ fn profile_on_crate(absolute_path: &std::path::PathBuf) -> AggrResult {
 }
 
 type RunResult = Duration;
+// Run `cargo kani` in a crate and parse out the compiler timing info outputted
+// by the `TIME_COMPILER` environment variable.
 fn run_command_in(absolute_path: &PathBuf) -> RunResult {
     // println!("running in {:?}", absolute_path);
     // `cargo clean` to ensure the compiler is run again
@@ -125,14 +126,17 @@ fn run_command_in(absolute_path: &PathBuf) -> RunResult {
         .output()
         .expect("cargo kani should succeed");
 
-    // parse the compiler time
+    // parse the output bytes into a string
     let out_str = String::from_utf8(kani_output.stdout).expect("utf8 conversion should succeed");
 
     if !kani_output.status.success() {
-        println!("outstr is {out_str:?}");
+        println!("the `TIME_COMPILER=true cargo kani --only-codegen` command failed in {absolute_path:?} with output -- {out_str:?}");
         panic!("cargo kani command failed");
     }
 
+    // parse that string for the compiler build information
+    // and if it's built multiple times (which could happen in a workspace with multiple crates), 
+    // we just sum up the total time
     out_str.split("\n").filter(|line| line.starts_with("BUILT")).map(extract_duration).sum()
 }
 
@@ -156,11 +160,10 @@ fn aggregate_results(path: &PathBuf, results: &[Duration]) -> AggrResult {
         })
         .collect::<Vec<Duration>>();
 
-    println!("iqr durations are {iqr_durations:?}");
-
     AggrResult::new(path.to_path_buf(), result_stats(&iqr_durations), result_stats(results))
 }
 
+// Record the stats from a subset slice of timing runs.
 fn result_stats(results: &[Duration]) -> Stats {
     let avg = results.iter().sum::<Duration>() / results.len().try_into().unwrap();
     let range = (*results.iter().min().unwrap(), *results.iter().max().unwrap());
