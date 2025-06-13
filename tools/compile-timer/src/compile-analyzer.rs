@@ -33,7 +33,7 @@ fn main() {
     let post_results = post_ser.into_iter::<AggrResult>().collect::<Vec<_>>();
 
     let mut results = pre_results.into_iter().filter_map(Result::ok).zip(post_results.into_iter().filter_map(Result::ok)).collect::<Vec<_>>();
-    results.sort_by_key(|a| signed_percent_diff(&a.0.iqr_stats.avg, &a.1.iqr_stats.avg).abs() as i64);
+    results.sort_by_key(|a| (signed_percent_diff(&a.0.iqr_stats.avg, &a.1.iqr_stats.avg).abs() * 1000_f64) as i64);
 
     if c.only_markdown {
         print_markdown(results.as_slice());
@@ -111,14 +111,14 @@ fn signed_percent_diff(pre: &Duration, post: &Duration) -> f64 {
 
 fn diff_string(pre: Duration, post: Duration) -> String {
     let change_dir = if post > pre {
-            "↑"
+            "<span style=\"color:green\">↑"
         } else if post == pre {
             "-"
         } else {
-            "↓"
+            "<span style=\"color:red\">↓"
         };
     let change_amount = signed_percent_diff(&pre, &post).abs();
-    format!("{change_dir} {:.2?} ({change_amount:.2}%)", pre.abs_diff(post))
+    format!("{change_dir} {:.2?} ({change_amount:.2}%) </span>", pre.abs_diff(post))
 }
 
 #[derive(Debug)]
