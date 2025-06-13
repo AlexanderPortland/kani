@@ -54,7 +54,7 @@ fn main() {
             new_res.serialize(&mut out_ser).unwrap();
             res.push(new_res); 
         } else {
-            // we want want to recur and visit all directories that aren't explicitly ignored
+            // we want want to recur and visit all directories that aren't explicitly ignored 
             to_visit.extend(std::fs::read_dir(next)
                 .unwrap()
                 .filter_map(|entry| {
