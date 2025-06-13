@@ -114,7 +114,7 @@ fn diff_string(pre: Duration, post: Duration) -> String {
             "<span style=\"color:green\">↑"
         } else if post == pre {
             "-"
-        } else {
+        } else { 
             "<span style=\"color:red\">↓"
         };
     let change_amount = signed_percent_diff(&pre, &post).abs();
