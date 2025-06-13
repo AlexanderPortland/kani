@@ -8,44 +8,33 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AggrResult {
     pub krate: PathBuf,
-    pub info: AggrInfo,
+    /// the stats for only the 25th-75th percentile of runs on this crate
+    pub iqr_stats: Stats,
+    // the stats for all runs on this crate
+    full_stats: Stats,
 }
 
 #[allow(dead_code)]
-// allowing dead code bc neither of the binaries are named `main.rs`, so the lints
-// don't seem to care that we use them there...
+// Allowing dead code here bc neither of the binaries are named `main.rs`, so the lints
+// don't seem to count that we use them there...
 impl AggrResult {
-    pub fn new(krate: PathBuf, info: AggrInfo) -> Self {
-        AggrResult { krate, info }
+    pub fn new(krate: PathBuf, iqr_stats: Stats, full_stats: Stats) -> Self {
+        AggrResult { krate, iqr_stats, full_stats }
     }
 
-    pub fn krate_mini_path(&self) -> String {
+    pub fn krate_trimmed_path(&self) -> String {
         format!(
             "{:?}",
             self.krate.strip_prefix(std::env::current_dir().unwrap().parent().unwrap()).unwrap()
         )
     }
-}
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct AggrInfo {
-    pub iqr: Stats, // the stats for only the 25th-75th percentile of runs on this crate
-    full: Stats,    // the stats for all runs on this crate
-}
-
-#[allow(dead_code)]
-// allowing dead code bc
-impl AggrInfo {
-    pub fn new(iqr: Stats, full: Stats) -> Self {
-        AggrInfo { iqr, full }
-    }
-
-    pub fn std_dev(&self) -> Duration {
-        self.full.std_dev
+    pub fn full_std_dev(&self) -> Duration {
+        self.full_stats.std_dev
     }
 
     pub fn iqr(&self) -> Duration {
-        self.iqr.range.1 - self.iqr.range.0
+        self.iqr_stats.range.1 - self.iqr_stats.range.0
     }
 }
 
@@ -59,10 +48,10 @@ pub struct Stats {
 #[allow(dead_code)]
 pub fn aggregate_aggregates(info: &[AggrResult]) -> (Duration, Duration) {
     for i in info {
-        println!("krate {:?} -- {:?}", i.krate, i.info.iqr.avg);
+        println!("krate {:?} -- {:?}", i.krate, i.iqr_stats.avg);
     }
 
-    (info.iter().map(|i| i.info.iqr.avg).sum(), info.iter().map(|i| i.info.iqr.std_dev).sum())
+    (info.iter().map(|i| i.iqr_stats.avg).sum(), info.iter().map(|i| i.iqr_stats.std_dev).sum())
 }
 
 #[allow(dead_code)]

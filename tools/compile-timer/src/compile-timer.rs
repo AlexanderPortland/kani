@@ -25,7 +25,6 @@ struct TimerArgs {
 mod common;
 
 use clap::Parser;
-use common::AggrInfo;
 use serde::Serialize;
 
 use crate::common::{AggrResult, Stats, aggregate_aggregates};
@@ -45,53 +44,41 @@ fn main() {
     let mut to_visit = vec![current];
     let mut res = Vec::new();
     let run_start = std::time::Instant::now();
-    let out_file = File::create(args.out_path).unwrap();
-    let mut out_ser = serde_json::Serializer::pretty(out_file);
+    println!("outputting to file {:?}", args.out_path.canonicalize().unwrap());
+    let mut out_ser = serde_json::Serializer::pretty(File::create(args.out_path.canonicalize().unwrap()).unwrap());
 
     while let Some(next) = to_visit.pop() {
-        let _p = next.canonicalize().unwrap();
-        let toml = next.canonicalize().unwrap().join("Cargo.toml");
-        // dbg!(&toml);
-        // println!("p is {p:?} next is {next:?}");
+        let path_to_toml = next.canonicalize().unwrap().join("Cargo.toml");
 
-        if toml.exists() && toml.is_file() {
+        if path_to_toml.exists() && path_to_toml.is_file() {
             // in rust directory so we profile that jawn
             println!("[!] profiling in {next:?}");
-            let new_res = profile_on_crate(&next).into_result(next);
+            let new_res = profile_on_crate(&next);
             new_res.serialize(&mut out_ser).unwrap();
             res.push(new_res);
         } else {
-            let a = std::fs::read_dir(next)
+            // we want want to recurr and visit all directories that aren't explicitly ignored
+            to_visit.extend(std::fs::read_dir(next)
                 .unwrap()
-                .filter_map(|entry| match entry {
-                    Err(_) => None,
-                    Ok(entry) => {
+                .filter_map(|entry| {
+                    if let Ok(entry) = entry {
                         let path = entry.path();
-                        if path.is_dir() {
-                            if args.ignore.iter().any(|i| path.ends_with(i)) {
-                                println!("path {path:?} is ignored");
-                                None
-                            } else {
-                                Some(path)
-                            }
-                        } else {
-                            None
+                        if path.is_dir() && args.ignore.iter().any(|ignored| path.ends_with(ignored)) {
+                            return Some(path);
                         }
                     }
-                })
-                .collect::<Vec<_>>();
-            // println!("recurr in {:?}", a);
-            to_visit.extend(a);
+                    None
+                }));
         }
     }
 
     let final_info = aggregate_aggregates(&res);
     println!("[!] total info is {final_info:?}");
-    // println!("");
+
     print!("\t [*] run took {:?}", run_start.elapsed());
 }
 
-fn profile_on_crate(absolute_path: &std::path::PathBuf) -> AggrInfo {
+fn profile_on_crate(absolute_path: &std::path::PathBuf) -> AggrResult {
     let _warmup_results = (0..WARMUP_RUNS)
         .map(|i| {
             print!("\t[*] running warmup {}/{WARMUP_RUNS}", i + 1);
@@ -112,7 +99,7 @@ fn profile_on_crate(absolute_path: &std::path::PathBuf) -> AggrInfo {
         })
         .collect::<Vec<_>>();
 
-    let aggr = aggregate_results(&timed_results);
+    let aggr = aggregate_results(absolute_path, &timed_results);
     println!("\t[!] results for {absolute_path:?} are in! {aggr:?}");
 
     aggr
@@ -155,33 +142,7 @@ fn extract_duration(s: &str) -> Duration {
     Duration::from_micros(micros)
 }
 
-// enum RunQuality {
-//     VeryGood,
-//     Good,
-//     Passable,
-//     Noisy,
-// }
-
-impl AggrInfo {
-    // fn classify_quality(&self) -> RunQuality {
-    //     match (self.full.std_dev.as_micros() as f64) / (self.full.std_dev.as_micros() as f64) {
-    //         d if d < 0.01 => RunQuality::VeryGood,
-    //         d if d < 0.05 => RunQuality::Good,
-    //         d if d < 0.1 => RunQuality::Passable,
-    //         _ => RunQuality::Noisy,
-    //     }
-    // }
-
-    fn into_result(self, krate: PathBuf) -> AggrResult {
-        AggrResult::new(krate, self)
-    }
-
-    // fn to_string(&self) -> String {
-    //     format!("")
-    // }
-}
-
-fn aggregate_results(results: &[Duration]) -> AggrInfo {
+fn aggregate_results(path: &PathBuf, results: &[Duration]) -> AggrResult {
     assert!(results.len() == TIMED_RUNS);
 
     let mut sorted = results.to_vec();
@@ -197,7 +158,7 @@ fn aggregate_results(results: &[Duration]) -> AggrInfo {
 
     println!("iqr durations are {iqr_durations:?}");
 
-    AggrInfo::new(result_stats(&iqr_durations), result_stats(results))
+    AggrResult::new(path.to_path_buf(), result_stats(&iqr_durations), result_stats(results))
 }
 
 fn result_stats(results: &[Duration]) -> Stats {

@@ -45,14 +45,14 @@ fn main() {
 fn print_to_terminal(results: &[(AggrResult, AggrResult)]) {
     let krate_column_len = results
         .iter()
-        .map(|(a, b)| max(a.krate_mini_path().len(), b.krate_mini_path().len()))
+        .map(|(a, b)| max(a.krate_trimmed_path().len(), b.krate_trimmed_path().len()))
         .max()
         .unwrap();
 
     for (pre_res, post_res) in results {
         assert!(pre_res.krate == post_res.krate);
-        let pre_time = pre_res.info.iqr.avg;
-        let post_time = post_res.info.iqr.avg;
+        let pre_time = pre_res.iqr_stats.avg;
+        let post_time = post_res.iqr_stats.avg;
 
         let change_dir = if post_time > pre_time {
             "↑"
@@ -67,7 +67,7 @@ fn print_to_terminal(results: &[(AggrResult, AggrResult)]) {
 
         println!(
             "krate {:krate_column_len$} -- [{:.2?} => {:.2?} ({change_dir}{change_amount:5.2}%)] {:?}",
-            pre_res.krate_mini_path(),
+            pre_res.krate_trimmed_path(),
             pre_time,
             post_time,
             Verdict::from_results(pre_res, post_res)
@@ -81,8 +81,8 @@ fn print_markdown(results: &[(AggrResult, AggrResult)]) {
     println!("| - | - | - | - | - |");
     for (pre_res, post_res) in results {
         assert!(pre_res.krate == post_res.krate);
-        let pre_time = pre_res.info.iqr.avg;
-        let post_time = post_res.info.iqr.avg;
+        let pre_time = pre_res.iqr_stats.avg;
+        let post_time = post_res.iqr_stats.avg;
 
         let change_dir = if post_time > pre_time {
             "↑"
@@ -98,7 +98,7 @@ fn print_markdown(results: &[(AggrResult, AggrResult)]) {
 
         println!(
             "| {} | {:.2?} | {:.2?} | {change_dir} {:.2?} ({change_amount:.2}%) | {:?} |",
-            pre_res.krate_mini_path(),
+            pre_res.krate_trimmed_path(),
             pre_time,
             post_time,
             pre_time.abs_diff(post_time),
@@ -124,13 +124,13 @@ enum NoiseExplanation {
 
 impl Verdict {
     fn from_results(pre: &AggrResult, post: &AggrResult) -> Self {
-        let pre_time = pre.info.iqr.avg;
-        let post_time = post.info.iqr.avg;
-        if pre.info.iqr.avg > post.info.iqr.avg {
+        let pre_time = pre.iqr_stats.avg;
+        let post_time = post.iqr_stats.avg;
+        if pre.iqr_stats.avg > post.iqr_stats.avg {
             return Self::Improved;
         }
 
-        let avg_std_dev = (pre.info.iqr() + post.info.iqr()) / 2;
+        let avg_std_dev = (pre.full_std_dev() + post.full_std_dev()) / 2;
         let std_dev_thresh = fraction_of_duration(avg_std_dev, 1.5);
         if post_time.abs_diff(pre_time) < std_dev_thresh {
             return Self::ProbablyNoise(NoiseExplanation::SmallComparedToStdDev(std_dev_thresh));
@@ -145,6 +145,7 @@ impl Verdict {
 }
 
 fn try_read_files(c: &AnalyzerArgs) -> io::Result<(File, File)> {
+    println!("reading from ({:?}, {:?})", c.path_pre.canonicalize()?, c.path_post.canonicalize()?);
     let pre = File::open(c.path_pre.canonicalize()?)?;
     let post = File::open(c.path_post.canonicalize()?)?;
 
