@@ -1,6 +1,6 @@
 // Copyright Kani Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-use std::{cmp::max, fs::File, io, path::PathBuf, time::Duration};
+use std::{cmp::max, fs::File, io, path::PathBuf, time::Duration, u32};
 
 use clap::Parser;
 mod common;
@@ -29,17 +29,11 @@ fn main() {
 
     let (pre_ser, post_ser) = (Deserializer::from_reader(pre), Deserializer::from_reader(post));
 
-    // let results = pre_ser
-    //     .into_iter::<AggrResult>()
-    //     .filter_map(Result::ok)
-    //     .zip(post_ser.into_iter::<AggrResult>().filter_map(Result::ok))
-    //     .collect::<Vec<_>>();
     let pre_results = pre_ser.into_iter::<AggrResult>().collect::<Vec<_>>();
     let post_results = post_ser.into_iter::<AggrResult>().collect::<Vec<_>>();
-    println!("pre is {pre_results:?}");
-    println!("post is {post_results:?}");
 
-    let results = pre_results.into_iter().filter_map(Result::ok).zip(post_results.into_iter().filter_map(Result::ok)).collect::<Vec<_>>();
+    let mut results = pre_results.into_iter().filter_map(Result::ok).zip(post_results.into_iter().filter_map(Result::ok)).collect::<Vec<_>>();
+    results.sort_by_key(|a| -signed_percent_diff(&a.0.iqr_stats.avg, &a.1.iqr_stats.avg) as i64);
 
     if c.only_markdown {
         print_markdown(results.as_slice());
@@ -84,12 +78,10 @@ fn print_to_terminal(results: &[(AggrResult, AggrResult)]) {
 
 // Print results in a markdown format (for GitHub actions).
 fn print_markdown(results: &[(AggrResult, AggrResult)]) {
-    println!("results {results:?}");
-
     println!("# Compiletime Results");
     let total_pre = results.iter().map(|i|i.0.iqr_stats.avg).sum();
     let total_post = results.iter().map(|i|i.1.iqr_stats.avg).sum();
-    println!("### *on the whole: {:.2?} => {:.2?} -- {} *", total_pre, total_post, diff_string(total_pre, total_post));
+    println!("### *on the whole: {:.2?} => {:.2?} -- {}*", total_pre, total_post, diff_string(total_pre, total_post));
     println!("| test crate | old compile time | new compile time | diff | verdict |");
     println!("| - | - | - | - | - |");
     for (pre_res, post_res) in results {
@@ -108,6 +100,15 @@ fn print_markdown(results: &[(AggrResult, AggrResult)]) {
     }
 }
 
+fn signed_percent_diff(pre: &Duration, post: &Duration) -> f64 {
+    let change_amount = (pre.abs_diff(*post).as_micros() as f64
+            / post.as_micros() as f64)
+            * 100_f64;
+    if (post < pre) {
+        -change_amount
+    } else { change_amount }
+}
+
 fn diff_string(pre: Duration, post: Duration) -> String {
     let change_dir = if post > pre {
             "↑"
@@ -116,9 +117,7 @@ fn diff_string(pre: Duration, post: Duration) -> String {
         } else {
             "↓"
         };
-    let change_amount = (pre.abs_diff(post).as_micros() as f64
-            / post.as_micros() as f64)
-            * 100_f64;
+    let change_amount = signed_percent_diff(&pre, &post).abs();
     format!("{change_dir} {:.2?} ({change_amount:.2}%)", pre.abs_diff(post))
 }
 
