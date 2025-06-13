@@ -54,6 +54,8 @@ jobs:
         run: cd old/tools/compile-timer && cargo build --release
       - name: Build `kani` in old
         run: cd old && cargo build-dev --release
+      - name: debug prints
+        run: ls -la /home/runner/work/kani/kani/old/target && ls -la /home/runner/work/kani/kani/old/target/kani && ls -la /home/runner/work/kani/kani/old/target/kani/bin
       - name: Run `compile-timer` on old
         run: |
           export PATH="${{ github.workspace }}/old/scripts:$PATH"
