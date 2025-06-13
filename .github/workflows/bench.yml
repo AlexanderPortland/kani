@@ -69,7 +69,7 @@ jobs:
         run: |
           export PATH="${{ github.workspace }}/old/scripts:$PATH"
           cd old/tests/perf && ../../target/release/compile-timer --out-path compile-times-old.json --ignore kani-lib --ignore display_trait --ignore s2n-quic --ignore hashset --ignore misc --ignore vec
-          cat old/tests/perf/compile-times-old.json
+          cat ${{ github.workspace }}/old/tests/perf/compile-times-old.json
       
       - name: Set up Kani Dependencies (new variant)
         uses: ./new/.github/actions/setup

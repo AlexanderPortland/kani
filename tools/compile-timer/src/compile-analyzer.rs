@@ -1,6 +1,6 @@
 // Copyright Kani Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
-use std::{cmp::max, fs::File, io, path::PathBuf};
+use std::{cmp::max, fs::File, io, path::PathBuf, time::Duration};
 
 use clap::Parser;
 mod common;
@@ -79,6 +79,9 @@ fn print_to_terminal(results: &[(AggrResult, AggrResult)]) {
 // Print results in a markdown format (for GitHub actions).
 fn print_markdown(results: &[(AggrResult, AggrResult)]) {
     println!("# Compiletime Results");
+    let total_pre = results.iter().map(|i|i.0.iqr_stats.avg).sum();
+    let total_post = results.iter().map(|i|i.1.iqr_stats.avg).sum();
+    println!("### *on the whole: {:.2?} => {:.2?} -- {} *", total_pre, total_post, diff_string(total_pre, total_post));
     println!("| test crate | old compile time | new compile time | diff | verdict |");
     println!("| - | - | - | - | - |");
     println!("results {results:?}");
@@ -87,27 +90,29 @@ fn print_markdown(results: &[(AggrResult, AggrResult)]) {
         let pre_time = pre_res.iqr_stats.avg;
         let post_time = post_res.iqr_stats.avg;
 
-        let change_dir = if post_time > pre_time {
+        println!(
+            "| {} | {:.2?} | {:.2?} | {} | {:?} |",
+            pre_res.krate_trimmed_path,
+            pre_time,
+            post_time,
+            diff_string(pre_time, post_time),
+            Verdict::from_results(pre_res, post_res)
+        );
+    }
+}
+
+fn diff_string(pre: Duration, post: Duration) -> String {
+    let change_dir = if post > pre {
             "↑"
-        } else if post_time == pre_time {
+        } else if post == pre {
             "-"
         } else {
             "↓"
         };
-
-        let change_amount = (pre_time.abs_diff(post_time).as_micros() as f64
-            / post_time.as_micros() as f64)
+    let change_amount = (pre.abs_diff(post).as_micros() as f64
+            / post.as_micros() as f64)
             * 100_f64;
-
-        println!(
-            "| {} | {:.2?} | {:.2?} | {change_dir} {:.2?} ({change_amount:.2}%) | {:?} |",
-            pre_res.krate_trimmed_path,
-            pre_time,
-            post_time,
-            pre_time.abs_diff(post_time),
-            Verdict::from_results(pre_res, post_res)
-        );
-    }
+    format!("{change_dir} {:.2?} ({change_amount:.2}%)", pre.abs_diff(post))
 }
 
 #[derive(Debug)]
