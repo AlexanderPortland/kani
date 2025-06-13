@@ -55,7 +55,7 @@ fn main() {
             println!("[!] profiling in {next:?}");
             let new_res = profile_on_crate(&next);
             new_res.serialize(&mut out_ser).unwrap();
-            res.push(new_res);
+            res.push(new_res); 
         } else {
             // we want want to recurr and visit all directories that aren't explicitly ignored
             to_visit.extend(std::fs::read_dir(next)
