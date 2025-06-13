@@ -108,7 +108,6 @@ type RunResult = Duration;
 // Run `cargo kani` in a crate and parse out the compiler timing info outputted
 // by the `TIME_COMPILER` environment variable.
 fn run_command_in(absolute_path: &PathBuf) -> RunResult {
-    // println!("running in {:?}", absolute_path);
     // `cargo clean` to ensure the compiler is run again
     let _ = Command::new("cargo")
         .current_dir(absolute_path)

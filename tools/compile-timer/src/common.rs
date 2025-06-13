@@ -46,6 +46,7 @@ pub struct Stats {
 }
 
 #[allow(dead_code)]
+// Sum the IQR averages and IQR standard deviations respectively for all crates timed.
 pub fn aggregate_aggregates(info: &[AggrResult]) -> (Duration, Duration) {
     for i in info {
         println!("krate {:?} -- {:?}", i.krate, i.iqr_stats.avg);

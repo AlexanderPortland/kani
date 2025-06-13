@@ -11,13 +11,13 @@ use crate::common::{AggrResult, fraction_of_duration};
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 struct AnalyzerArgs {
-    /// Sets a custom config file
     #[arg(short, long, value_name = "FILE")]
     path_pre: PathBuf,
 
     #[arg(short, long, value_name = "FILE")]
     path_post: PathBuf,
 
+    /// Output results in markdown format
     #[arg(short, long)]
     only_markdown: bool,
 }
@@ -42,6 +42,7 @@ fn main() {
     }
 }
 
+// Print results for a terminal output.
 fn print_to_terminal(results: &[(AggrResult, AggrResult)]) {
     let krate_column_len = results
         .iter()
@@ -75,6 +76,7 @@ fn print_to_terminal(results: &[(AggrResult, AggrResult)]) {
     }
 }
 
+// Print results in a markdown format (for GitHub actions).
 fn print_markdown(results: &[(AggrResult, AggrResult)]) {
     println!("# Compiletime Results");
     println!("| test crate | old compile time | new compile time | diff | verdict |");
@@ -120,6 +122,7 @@ enum Verdict {
 
 #[derive(Debug)]
 #[allow(dead_code)]
+/// The reason a regression was flagged as likely noise rather than a true performance regression.
 enum NoiseExplanation {
     /// The increase in compile time is so small compared to the
     /// sample's standard deviation that it is probably just sampling noise.
@@ -131,8 +134,8 @@ enum NoiseExplanation {
 
 impl Verdict {
     fn from_results(pre: &AggrResult, post: &AggrResult) -> Self {
-        let pre_time = pre.iqr_stats.avg;
-        let post_time = post.iqr_stats.avg;
+        let (pre_time, post_time) = (pre.iqr_stats.avg, post.iqr_stats.avg);
+
         if pre.iqr_stats.avg > post.iqr_stats.avg {
             return Self::Improved;
         }
@@ -153,8 +156,8 @@ impl Verdict {
 
 fn try_read_files(c: &AnalyzerArgs) -> io::Result<(File, File)> {
     println!("reading from ({:?}, {:?})", c.path_pre.canonicalize()?, c.path_post.canonicalize()?);
-    let pre = File::open(c.path_pre.canonicalize()?)?;
-    let post = File::open(c.path_post.canonicalize()?)?;
-
-    io::Result::Ok((pre, post))
+    io::Result::Ok((
+        File::open(c.path_pre.canonicalize()?)?, 
+        File::open(c.path_post.canonicalize()?)?
+    ))
 }
