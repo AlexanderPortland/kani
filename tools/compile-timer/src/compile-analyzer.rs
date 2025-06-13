@@ -110,15 +110,22 @@ fn print_markdown(results: &[(AggrResult, AggrResult)]) {
 #[derive(Debug)]
 #[allow(dead_code)]
 enum Verdict {
+    /// This crate now compiles faster!
     Improved,
+    /// This crate compiled slower, but likely because of OS noise.
     ProbablyNoise(NoiseExplanation),
+    /// This crate compiled slower, potentially indicating a true performance regression.
     PotentialRegression(std::time::Duration, std::time::Duration),
 }
 
 #[derive(Debug)]
 #[allow(dead_code)]
 enum NoiseExplanation {
+    /// The increase in compile time is so small compared to the
+    /// sample's standard deviation that it is probably just sampling noise.
     SmallComparedToStdDev(std::time::Duration),
+    /// The percentage increase in compile time is so small, 
+    /// the difference is likely insignificant.
     SmallPercentageChange,
 }
 
