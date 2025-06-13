@@ -118,7 +118,7 @@ fn diff_string(pre: Duration, post: Duration) -> String {
             "<style type=\"text/css\">{color:red;}↓{color:green;}"
         };
     let change_amount = signed_percent_diff(&pre, &post).abs();
-    format!("{change_dir} {:.2?} ({change_amount:.2}%) </span>", pre.abs_diff(post))
+    format!("{change_dir} {:.2?} ({change_amount:.2}%) </style>", pre.abs_diff(post))
 }
 
 #[derive(Debug)]
