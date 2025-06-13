@@ -1,3 +1,3 @@
 hello
-$\color{red}{\textsf{hello}}$
+$\color{red}{hello}$
 $\color{red}\textsf{hello}$
