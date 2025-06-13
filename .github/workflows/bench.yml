@@ -81,7 +81,7 @@ jobs:
           cd new/tests/perf && ../../target/release/compile-timer --out-path compile-times-new.json --ignore kani-lib --ignore display_trait --ignore s2n-quic
 
       - name: Run analysis between the two
-        run: ./old/target/release/compile-analyzer --path-pre old/compile-times-old.json --path-post new/compile-times-new.json --only-markdown >> "$GITHUB_STEP_SUMMARY"
+        run: ./old/target/release/compile-analyzer --path-pre old/tests/perf/compile-times-old.json --path-post new/tests/perf/compile-times-new.json --only-markdown >> "$GITHUB_STEP_SUMMARY"
   # perf-benchcomp: 
   #   runs-on: ubuntu-24.04
   #   steps:
