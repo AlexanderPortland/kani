@@ -31,6 +31,7 @@ echo "Finding all kani-driver files:"
 find "${GITHUB_WORKSPACE}" -name "kani-driver" -type f
 
 
+
 if [[ ! -x ${KANI_DRIVER} ]]
 then
     echo "ERROR: Could not find kani-driver binary."
