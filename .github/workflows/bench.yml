@@ -82,7 +82,7 @@ jobs:
 
       - name: Run analysis between the two
         run: ./old/target/release/compile-analyzer --path-pre old/compile-times-old.json --path-post new/compile-times-new.json --only-markdown >> "$GITHUB_STEP_SUMMARY"
-  # perf-benchcomp:
+  # perf-benchcomp: 
   #   runs-on: ubuntu-24.04
   #   steps:
   #     - name: Save push event HEAD and HEAD~ to environment variables
