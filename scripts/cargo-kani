@@ -21,6 +21,7 @@ file ${KANI_DRIVER}
 echo "Symlink check:"
 readlink -f ${KANI_DRIVER}
 
+
 if [[ ! -x ${KANI_DRIVER} ]]
 then
     echo "ERROR: Could not find kani-driver binary."
