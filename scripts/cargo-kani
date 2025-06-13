@@ -12,14 +12,23 @@ KANI_DRIVER="$REPO_DIR/target/kani/bin/kani-driver"
 
 set -eux
 
-echo "File exists test: $(test -f ${KANI_DRIVER} && echo "yes" || echo "no")"
-echo "Executable test: $(test -x ${KANI_DRIVER} && echo "yes" || echo "no")"
-echo "File permissions:"
-ls -la ${KANI_DRIVER}
-echo "File type:"
-file ${KANI_DRIVER}
-echo "Symlink check:"
-readlink -f ${KANI_DRIVER}
+echo "Current working directory: $(pwd)"
+echo "Full path we're checking: ${KANI_DRIVER}"
+echo "Directory contents:"
+ls -la "$(dirname ${KANI_DRIVER})"
+echo "Parent directory contents:"
+ls -la "$(dirname $(dirname ${KANI_DRIVER}))"
+echo "Full directory tree:"
+tree "$(dirname $(dirname $(dirname ${KANI_DRIVER})))"
+
+# Try both absolute and relative paths
+ABSOLUTE_PATH="$(readlink -f ${KANI_DRIVER})"
+echo "Absolute path: ${ABSOLUTE_PATH}"
+echo "File exists test (absolute): $(test -f "${ABSOLUTE_PATH}" && echo "yes" || echo "no")"
+
+# Check if we can find the file anywhere in the workspace
+echo "Finding all kani-driver files:"
+find "${GITHUB_WORKSPACE}" -name "kani-driver" -type f
 
 
 if [[ ! -x ${KANI_DRIVER} ]]
