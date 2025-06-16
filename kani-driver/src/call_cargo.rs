@@ -321,8 +321,13 @@ impl KaniSession {
                     && t1.doc == t2.doc)
         }
 
+        let compile_start = std::time::Instant::now();
         let artifacts = self.run_build(cargo_cmd)?;
-        debug!(?artifacts, "run_build_target");
+        if std::env::var("TIME_COMPILER").is_ok() {
+            // conditionally print the compilation time for debugging & use by `compile-timer`
+            // doesn't just use the existing `--debug` flag because the number of prints significantly affects performance
+            println!("BUILT {} IN {:?}μs", target.name, compile_start.elapsed().as_micros());
+        }
 
         // We generate kani specific artifacts only for the build target. The build target is
         // always the last artifact generated in a build, and all the other artifacts are related
