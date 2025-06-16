@@ -32,6 +32,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      issues: write
     outputs:
       all-labels: ${{ steps.labeler.outputs.all-labels }}
       new-labels: ${{ steps.labeler.outputs.new-labels }}
