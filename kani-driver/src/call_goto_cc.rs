@@ -39,6 +39,7 @@ impl KaniSession {
         output: &Path,
         function: &str,
     ) -> Result<()> {
+        println!("useless debug print in call_goto_cc.rs");
         let mut cmd = Command::new("goto-cc");
         cmd.arg(input).args(["--function", function, "-o"]).arg(output);
 
