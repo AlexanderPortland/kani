@@ -159,8 +159,7 @@ impl IrepKey {
     /// named_sub[named_sub.len()-1].1
     /// ```
     fn new(id: usize, sub: &[usize], named_sub: &[(usize, usize)]) -> Self {
-        let size = sub.len() + 2 * named_sub.len() + 3;
-        let mut vec: Vec<usize> = Vec::with_capacity(size);
+        let mut vec: Vec<usize> = vec![];
         vec.push(id);
         vec.push(sub.len());
         vec.extend_from_slice(sub);
