@@ -159,11 +159,12 @@ impl IrepKey {
     /// named_sub[named_sub.len()-1].1
     /// ```
     fn new(id: usize, sub: &[usize], named_sub: &[(usize, usize)]) -> Self {
-        let size = sub.len() + 2 * named_sub.len() + 3;
-        let mut vec: Vec<usize> = Vec::with_capacity(size);
+        let mut vec = Vec::new();
         vec.push(id);
         vec.push(sub.len());
-        vec.extend_from_slice(sub);
+        for &s in sub {
+            vec.push(s);
+        }
         vec.push(named_sub.len());
         for (k, v) in named_sub {
             vec.push(*k);
@@ -215,7 +216,7 @@ struct IrepNumbering {
     inv_string_cache: Vec<NumberedString>,
 
     /// Map from [IrepKey] to their unique numbers.
-    cache: FxHashMap<IrepKey, usize>,
+    cache: Vec<(IrepKey, usize)>,
 
     /// Inverse cache, allows to get a NumberedIrep from its unique number.
     inv_cache: IrepNumberingInv,
@@ -244,7 +245,7 @@ impl IrepNumbering {
         IrepNumbering {
             string_cache: FxHashMap::default(),
             inv_string_cache: Vec::new(),
-            cache: FxHashMap::default(),
+            cache: Vec::default(),
             inv_cache: IrepNumberingInv::new(),
         }
     }
@@ -309,12 +310,14 @@ impl IrepNumbering {
     /// Gets the existing [NumberedIrep] from the [IrepKey] or inserts a fresh
     /// one and returns it.
     fn get_or_insert(&mut self, key: IrepKey) -> NumberedIrep {
-        let number = self.cache.entry(key).or_insert_with_key(|key| {
-            // This is where the key gets its unique number assigned.
-            self.inv_cache.add_key(key)
-        });
-
-        self.inv_cache.index[*number]
+        for (existing_key, existing_number) in self.cache.iter() {
+            if existing_key == &key {
+                return self.inv_cache.index[*existing_number];
+            }
+        }
+        let number = self.inv_cache.add_key(&key);
+        self.cache.push((key, number));
+        self.inv_cache.index[number]
     }
 
     /// Returns the unique number of the `id` field of the given [NumberedIrep].
@@ -454,7 +457,8 @@ where
         if self.is_first_write_string(num) {
             // first occurrence
             numbered_string.string.map(|raw_str| {
-                for c in raw_str.chars() {
+                let string = raw_str.to_string();
+                for c in string.chars() {
                     if c.is_ascii() {
                         // add escape character for backslashes and 0
                         if c == '0' || c == '\\' {
