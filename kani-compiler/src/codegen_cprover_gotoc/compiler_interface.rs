@@ -83,6 +83,7 @@ impl GotocCodegenBackend {
         check_contract: Option<InternalDefId>,
         mut transformer: BodyTransformation,
     ) -> (GotocCtx<'tcx>, Vec<MonoItem>, Option<AssignsContract>) {
+        println!("start doing work on {:?}", std::thread::current().id());
         // This runs reachability analysis before global passes are applied.
         //
         // Alternatively, we could run reachability only once after the global passes are applied
@@ -201,13 +202,15 @@ impl GotocCodegenBackend {
 
         gcx.handle_quantifiers();
 
+        println!("did all the work on {:?}", std::thread::current().id());
+
         // No output should be generated if user selected no_codegen.
         if !tcx.sess.opts.unstable_opts.no_codegen && tcx.sess.opts.output_types.should_codegen() {
             let pretty = self.queries.lock().unwrap().args().output_pretty_json;
             let cloned_symbol_table = gcx.symbol_table.clone();
             let cloned_path = symtab_goto.to_owned();
             let new_handle = std::thread::spawn(move ||{
-                println!("writing file...");
+                println!("writing file on {:?}...", std::thread::current().id());
                 write_file(&cloned_path, ArtifactType::PrettyNameMap, &pretty_name_map, pretty);
                 write_goto_binary_file(&cloned_path, &cloned_symbol_table);
                 write_file(&cloned_path, ArtifactType::TypeMap, &type_map, pretty);
@@ -215,6 +218,7 @@ impl GotocCodegenBackend {
                 if let Some(restrictions) = vtable_restrictions {
                     write_file(&cloned_path, ArtifactType::VTableRestriction, &restrictions, pretty);
                 }
+                println!("DONE writing file on {:?}...", std::thread::current().id());
             });
             self.file_write_handles.borrow_mut().push(new_handle);
         }

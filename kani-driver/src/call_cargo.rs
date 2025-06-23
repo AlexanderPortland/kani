@@ -357,6 +357,7 @@ crate-type = ["lib"]
                     && t1.doc == t2.doc)
         }
 
+        println!("START BUILDING {}", target.name);
         let compile_start = std::time::Instant::now();
         let artifacts = self.run_build(cargo_cmd)?;
         if std::env::var("TIME_COMPILER").is_ok() {
