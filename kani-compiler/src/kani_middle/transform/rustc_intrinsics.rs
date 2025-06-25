@@ -13,7 +13,7 @@ use crate::kani_middle::transform::body::{
 };
 use crate::kani_middle::transform::{TransformPass, TransformationType};
 use crate::kani_queries::QueryDb;
-use rustc_middle::ty::TyCtxt;
+use rustc_middle::ty::{self, TyCtxt};
 use rustc_smir::rustc_internal;
 use stable_mir::mir::mono::Instance;
 use stable_mir::mir::{
@@ -68,6 +68,42 @@ fn is_panic_function(tcx: &TyCtxt, def_id: rustc_smir::stable_mir::DefId) -> boo
         || tcx.has_attr(def_id, rustc_span::sym::rustc_const_panic_str)
         || Some(def_id) == tcx.lang_items().panic_fmt()
         || Some(def_id) == tcx.lang_items().begin_panic_fn()
+}
+
+fn is_format_function<'tcx>(
+    tcx: &TyCtxt<'tcx>,
+    def_id: rustc_smir::stable_mir::DefId,
+) -> Option<rustc_middle::ty::Ty<'tcx>> {
+    let original_def_id_name = def_id.name();
+    if original_def_id_name.ends_with("unwrap_failed") {
+                    return Some(rustc_internal::internal(*tcx, rustc_smir::stable_mir::ty::Ty::bool_ty()));
+                }
+
+    let def_id = rustc_internal::internal(*tcx, def_id);
+
+    if let Some(parent_impl) = tcx.impl_of_method(def_id) {
+        // println!("parent of {:?} is {:?}", def_id, parent_impl);
+        let ty = tcx.type_of(parent_impl).skip_binder();
+        // println!("that has type {:?}", ty);
+        if let ty::Adt(adt_def, _) = ty.kind() {
+            let def_id = adt_def.did();
+            // if Some(def_id) == tcx.lang_items().format_argument()
+            //     || Some(def_id) == tcx.lang_items().format_arguments()
+            {
+                // original_def_id_name.ends_with("new_display") 
+                // || original_def_id_name.ends_with("new_debug")
+                // || original_def_id_name.ends_with("new_v1") 
+                // {
+                //     return Some(ty);
+                // } else 
+                {
+                    println!("ignoring {:?}", original_def_id_name);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 impl RustcIntrinsicsPass {
@@ -170,13 +206,26 @@ impl MutMirVisitor for ReplaceIntrinsicCallVisitor<'_, '_> {
     /// Note that we only need to replace function calls since intrinsics must always be called
     /// directly. I.e., no need to handle function pointers.
     fn visit_terminator(&mut self, term: &mut Terminator) {
-        if let TerminatorKind::Call { func, .. } = &mut term.kind
-            && let TyKind::RigidTy(RigidTy::FnDef(def, args)) =
+        // println!("trying to replace term w/ {:?}", term);
+        // if let TerminatorKind::Call { func, args: _, destination: _, target, .. } = &mut term.kind
+        //     && let TyKind::RigidTy(RigidTy::FnDef(def, args)) =
+        //         func.ty(&self.locals).unwrap().kind()
+        // {
+        //     if is_format_function(&self.tcx, def.0).is_some() {
+        //         *term = Terminator {
+        //             kind: TerminatorKind::Goto { target: target.clone().unwrap() },
+        //             span: term.span,
+        //         };
+        //     }
+        // }
+
+        if let TerminatorKind::Call { func, args: fun_args, destination: _, target, .. } = &mut term.kind
+            && let TyKind::RigidTy(RigidTy::FnDef(def, mut generic_args)) =
                 func.ty(&self.locals).unwrap().kind()
         {
             // Get the model we should use to replace this function call, if any.
             let replacement_model = if def.is_intrinsic() {
-                let instance = Instance::resolve(def, &args).unwrap();
+                let instance = Instance::resolve(def, &generic_args).unwrap();
                 let intrinsic = Intrinsic::from_instance(&instance);
                 debug!(?intrinsic, "handle_terminator");
                 match intrinsic {
@@ -193,12 +242,28 @@ impl MutMirVisitor for ReplaceIntrinsicCallVisitor<'_, '_> {
                 }
             } else if is_panic_function(&self.tcx, def.0) {
                 // If we find a panic function, we replace it with our stub.
+                // println!("fn {:?} IS panic", def.0);
                 self.models[&KaniModel::PanicStub]
-            } else {
+            } 
+            else if let Some(parent_def) = is_format_function(&self.tcx, def.0) {
+                println!("fn {:?} IS format", def.0);
+                println!("\t -> {:?}", parent_def);
+
+                // let replacement_model = self.models[&KaniModel::FormatStub];
+                let a = rustc_internal::stable(parent_def);
+                // let new_instance = Instance::resolve(replacement_model, &GenericArgs(vec![GenericArgKind::Type(a)])).unwrap();
+                generic_args = GenericArgs(vec![GenericArgKind::Type(a)]);
+                fun_args.clear();
+                self.models[&KaniModel::FormatStub]
+            } 
+            else {
+                // println!("fn {:?} isn't panic, or format", def.0);
+                // println!("lang items are {:?}", self.tcx.lang_items());
+                // panic!();
                 return self.super_terminator(term);
             };
 
-            let new_instance = Instance::resolve(replacement_model, &args).unwrap();
+            let new_instance = Instance::resolve(replacement_model, &generic_args).unwrap();
 
             // Construct the wrapper types needed to insert our resolved model [Instance]
             // back into the MIR as an operand.

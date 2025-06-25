@@ -39,6 +39,14 @@ macro_rules! generate_models {
                 loop {}
             }
 
+            #[kanitool::fn_marker = "FormatStub"]
+            pub fn format_stub<T>() -> ! {
+                // need some way to make this type check without doing anything
+                // unsafe { std::mem::MaybeUninit::<T>::uninit().assume_init() }
+                loop {}
+                // unreachable!();
+            }
+
             #[kanitool::fn_marker = "AlignOfValRawModel"]
             pub fn align_of_val_raw<T: ?Sized>(ptr: *const T) -> usize {
                 if let Some(size) = kani::mem::checked_align_of_raw(ptr) {
