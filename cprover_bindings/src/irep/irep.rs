@@ -19,8 +19,9 @@ use std::fmt::Debug;
 pub struct Irep<'b> {
     pub id: IrepId,
     pub sub: Vec<Irep<'b>, &'b Bump>,
-    pub named_sub: LinearMap<IrepId, Irep<'b>>,
+    pub named_sub: LinearMap<IrepId, Irep<'b>>, 
 }
+
 
 /// Getters
 impl Irep<'_> {
@@ -39,6 +40,15 @@ impl Irep<'_> {
 /// Fluent Builders
 impl<'b> Irep<'b> {
     pub fn with_location(self, l: &'b Location, mm: &MachineModel) -> Self {
+        let arena = *self.sub.allocator();
+        if !l.is_none() {
+            self.with_named_sub(IrepId::CSourceLocation, l.to_irep(arena, mm))
+        } else {
+            self
+        }
+    }
+
+    pub fn with_owned_location(self, l: Location, mm: &MachineModel) -> Self {
         let arena = *self.sub.allocator();
         if !l.is_none() {
             self.with_named_sub(IrepId::CSourceLocation, l.to_irep(arena, mm))
@@ -69,6 +79,11 @@ impl<'b> Irep<'b> {
     }
 
     pub fn with_type(self, t: &'b Type, mm: &MachineModel) -> Self {
+        let arena = *self.sub.allocator();
+        self.with_named_sub(IrepId::Type, t.to_irep(arena, mm))
+    }
+
+    pub fn with_owned_type(self, t: Type, mm: &MachineModel) -> Self {
         let arena = *self.sub.allocator();
         self.with_named_sub(IrepId::Type, t.to_irep(arena, mm))
     }

@@ -50,19 +50,23 @@ pub struct VecWrapper<'b>(pub &'b std::vec::Vec<Irep<'b>, &'b bumpalo::Bump>);
 
 impl<'b> Serialize for VecWrapper<'b> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer {
+    where
+        S: Serializer,
+    {
         // manually implementing this jawn bc the blanket implementation doesn't cover generic allocators :(
         serializer.collect_seq(self.0)
     }
 }
 
-pub struct BTreeMapWrapper<'b>(pub &'b std::collections::BTreeMap<InternedString, Symbol<'b>, &'b bumpalo::Bump>);
+pub struct BTreeMapWrapper<'b>(
+    pub &'b std::collections::BTreeMap<InternedString, Symbol<'b>, &'b bumpalo::Bump>,
+);
 
 impl<'b> Serialize for BTreeMapWrapper<'b> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where
-            S: Serializer {
+    where
+        S: Serializer,
+    {
         // manually implementing this jawn bc the blanket implementation doesn't cover generic allocators :(
         serializer.collect_map(self.0)
     }
