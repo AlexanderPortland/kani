@@ -17,18 +17,18 @@ pub trait ToIrep {
     fn to_irep<'b>(&self, arena: &'b Bump, mm: &MachineModel) -> Irep<'b>;
 }
 
-fn collect_into<'b, T: IntoIterator>(t: T, arena: &'b Bump) -> Vec<T::Item, &'b Bump> {
+fn collect_into<'b, T: IntoIterator>(t: T, arena: &'b Bump) -> std::mem::ManuallyDrop<Vec<T::Item, &'b Bump>> {
     let mut v = Vec::new_in(arena);
     let mut i = t.into_iter();
     while let Some(t) = i.next() {
         v.push(t);
     }
-    v
+    std::mem::ManuallyDrop::new(v)
 }
 
 macro_rules! vec_in {
     ($arena:expr $(,)?) => {
-        Vec::new_in($arena)
+        std::mem::ManuallyDrop::new(Vec::new_in($arena))
     };
     ($arena:expr, $($x:expr),+ $(,)?) => {
         collect_into([$($x),+], $arena)
@@ -47,14 +47,14 @@ fn arguments_irep<'b, 'a>(
         named_sub: linear_map![],
     }
 }
-fn code_irep<'b>(arena: &'b Bump, kind: IrepId, ops: Vec<Irep<'b>, &'b Bump>) -> Irep<'b> {
+fn code_irep<'b>(arena: &'b Bump, kind: IrepId, ops: std::mem::ManuallyDrop<Vec<Irep<'b>, &'b Bump>>) -> Irep<'b> {
     Irep {
         id: IrepId::Code,
         sub: ops,
         named_sub: linear_map![(IrepId::Statement, Irep::just_id(arena, kind))],
     }
 }
-fn side_effect_irep<'b>(arena: &'b Bump, kind: IrepId, ops: Vec<Irep<'b>, &'b Bump>) -> Irep<'b> {
+fn side_effect_irep<'b>(arena: &'b Bump, kind: IrepId, ops: std::mem::ManuallyDrop<Vec<Irep<'b>, &'b Bump>>) -> Irep<'b> {
     Irep {
         id: IrepId::SideEffect,
         named_sub: linear_map![(IrepId::Statement, Irep::just_id(arena, kind))],

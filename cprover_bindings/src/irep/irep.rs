@@ -18,10 +18,9 @@ use std::fmt::Debug;
 #[derive(Clone, Debug, PartialEq)]
 pub struct Irep<'b> {
     pub id: IrepId,
-    pub sub: Vec<Irep<'b>, &'b Bump>,
-    pub named_sub: LinearMap<IrepId, Irep<'b>>, 
+    pub sub: std::mem::ManuallyDrop<Vec<Irep<'b>, &'b Bump>>,
+    pub named_sub: LinearMap<IrepId, Irep<'b>>// TODO: make this jawn a hash map
 }
-
 
 /// Getters
 impl Irep<'_> {
@@ -128,7 +127,7 @@ impl<'b> Irep<'b> {
     }
 
     pub fn just_id(arena: &'b Bump, id: IrepId) -> Irep {
-        Irep { id, sub: Vec::new_in(arena), named_sub: LinearMap::new() }
+        Irep { id, sub: std::mem::ManuallyDrop::new(Vec::new_in(arena)), named_sub: LinearMap::new() }
     }
 
     pub fn just_int_id<T>(arena: &'b Bump, i: T) -> Irep
@@ -138,15 +137,15 @@ impl<'b> Irep<'b> {
         Irep::just_id(arena, IrepId::from_int(i))
     }
     pub fn just_named_sub(arena: &'b Bump, named_sub: LinearMap<IrepId, Irep<'b>>) -> Irep<'b> {
-        Irep { id: IrepId::EmptyString, sub: Vec::new_in(arena), named_sub }
+        Irep { id: IrepId::EmptyString, sub: std::mem::ManuallyDrop::new(Vec::new_in(arena)), named_sub }
     }
 
     pub fn just_string_id<T: Into<InternedString>>(arena: &'b Bump, s: T) -> Irep {
         Irep::just_id(arena, IrepId::from_string(s))
     }
 
-    pub fn just_sub(sub: Vec<Irep<'b>, &'b Bump>) -> Irep {
-        Irep { id: IrepId::EmptyString, sub, named_sub: LinearMap::new() }
+    pub fn just_sub(sub: std::mem::ManuallyDrop<Vec<Irep<'b>, &'b Bump>>) -> Irep {
+        Irep { id: IrepId::EmptyString, sub: sub, named_sub: LinearMap::new() }
     }
 
     pub fn nil(arena: &'b Bump) -> Irep {
@@ -161,7 +160,7 @@ impl<'b> Irep<'b> {
         Irep::just_id(arena, IrepId::Id0)
     }
 
-    pub fn tuple(sub: Vec<Irep<'b>, &'b Bump>) -> Self {
+    pub fn tuple(sub: std::mem::ManuallyDrop<Vec<Irep<'b>, &'b Bump>>) -> Self {
         Irep {
             id: IrepId::Tuple,
             named_sub: linear_map![(IrepId::Type, Irep::just_id(sub.allocator(), IrepId::Tuple))],
