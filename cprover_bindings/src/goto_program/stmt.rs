@@ -26,8 +26,8 @@ use std::fmt::Debug;
 /// This is not currently implemented for these expressions, but would be possible given a factory.
 #[derive(Debug, Clone)]
 pub struct Stmt {
-    body: Box<StmtBody>,
-    location: Location,
+    pub body: Box<StmtBody>,
+    pub location: Location,
 }
 /// The different kinds of bodies a statement can have.
 /// The names are chosen to map directly onto the IrepID used by CBMC.

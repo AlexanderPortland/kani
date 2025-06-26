@@ -165,9 +165,35 @@ impl ToIrep for DatatypeComponent {
             DatatypeComponent::Padding { name, bits } => Irep::just_named_sub(arena, linear_map![
                 (IrepId::CIsPadding, Irep::one(arena)),
                 (IrepId::Name, Irep::just_string_id(arena, name.to_string())),
-                (IrepId::Type, Type::unsigned_int(*bits).to_irep(arena, mm)),
+                (IrepId::Type, Type::unsigned_int(*bits).into_irep(arena, mm)),
             ]),
         }
+    }
+}
+
+impl Expr {
+    fn to_irep<'b>(self, arena: &'b Bump, mm: &MachineModel) -> Irep<'b> {
+        if let ExprValue::IntConstant(i) = self.value() {
+            let typ_width = self.typ().native_width(mm);
+            let irep_value = if let Some(width) = typ_width {
+                Irep::just_bitpattern_id(arena, i.clone(), width, self.typ().is_signed(mm))
+            } else {
+                Irep::just_int_id(arena, i.clone())
+            };
+            Irep {
+                id: IrepId::Constant,
+                sub: vec_in![arena],
+                named_sub: linear_map![(IrepId::Value, irep_value,)],
+            }
+            .with_location(self.location(), mm)
+            .with_type(self.typ(), mm)
+        } else {
+            self.value().to_irep(arena, mm).with_location(self.location(), mm).with_type(self.typ(), mm)
+        }
+        .with_named_sub_option(
+            IrepId::CCSizeofType,
+            self.size_of_annotation().map(|ty| ty.to_irep(arena, mm)),
+        )
     }
 }
 
@@ -348,7 +374,7 @@ impl ToIrep for ExprValue {
             ExprValue::SelfOp { op, e } => side_effect_irep(arena, op.to_irep_id(), vec_in![arena, e.to_irep(arena, mm)]),
             ExprValue::StatementExpression { statements: ops, location: loc } => side_effect_irep(arena, 
                 IrepId::StatementExpression,
-                vec_in![arena, Stmt::block(ops.to_vec(), *loc).to_irep(arena, mm)],
+                vec_in![arena, Stmt::block(ops.to_vec(), *loc).into_irep(arena, mm)],
             ),
             ExprValue::StringConstant { s } => Irep {
                 id: IrepId::StringConstant,
@@ -513,9 +539,111 @@ impl ToIrep for Parameter {
     }
 }
 
+impl Stmt {
+    fn to_irep<'b>(self, arena: &'b Bump, mm: &MachineModel) -> Irep<'b> {
+        self.body.into_irep(arena, mm).with_location(&self.location, mm)
+    }
+}
+
 impl ToIrep for Stmt {
     fn to_irep<'b>(&'b self, arena: &'b Bump, mm: &MachineModel) -> Irep<'b> {
         self.body().to_irep(arena, mm).with_location(self.location(), mm)
+    }
+}
+
+impl StmtBody {
+    fn into_irep<'b>(self, arena: &'b Bump, mm: &MachineModel) -> Irep<'b> {
+        match self {
+            StmtBody::Assign { lhs, rhs } => {
+                code_irep(arena, IrepId::Assign, vec_in![arena, lhs.to_irep(arena, mm), rhs.to_irep(arena, mm)])
+            }
+            StmtBody::Assert { cond, .. } => code_irep(arena, IrepId::Assert, vec_in![arena, cond.to_irep(arena, mm)]),
+            StmtBody::Assume { cond } => code_irep(arena, IrepId::Assume, vec_in![arena, cond.to_irep(arena, mm)]),
+            StmtBody::AtomicBlock(stmts) => {
+                let mut irep_stmts = vec_in![arena, code_irep(arena, IrepId::AtomicBegin, vec_in![arena])];
+                irep_stmts.extend(&mut stmts.iter().map(|x| x.to_irep(arena, mm)));
+                irep_stmts.push(code_irep(arena, IrepId::AtomicEnd, vec_in![arena]));
+                code_irep(arena, IrepId::Block, irep_stmts)
+            }
+            StmtBody::Block(stmts) => {
+                code_irep(arena, IrepId::Block, collect_into(stmts.iter().map(|x| x.to_irep(arena, mm)), arena))
+            }
+            StmtBody::Break => code_irep(arena, IrepId::Break, vec_in![arena]),
+            StmtBody::Continue => code_irep(arena, IrepId::Continue, vec_in![arena]),
+            StmtBody::Dead(symbol) => code_irep(arena, IrepId::Dead, vec_in![arena, symbol.to_irep(arena, mm)]),
+            StmtBody::Decl { lhs, value } => {
+                if value.is_some() {
+                    code_irep(arena, 
+                        IrepId::Decl,
+                        vec_in![arena, lhs.to_irep(arena, mm), value.as_ref().unwrap().to_irep(arena, mm)],
+                    )
+                } else {
+                    code_irep(arena, IrepId::Decl, vec_in![arena, lhs.to_irep(arena, mm)])
+                }
+            }
+            StmtBody::Deinit(place) => {
+                // CBMC doesn't yet have a notion of poison (https://github.com/diffblue/cbmc/issues/7014)
+                // So we translate identically to `nondet` here, but add a comment noting we wish it were poison
+                // potentially for other backends to pick up and treat specially.
+                code_irep(arena, IrepId::Assign, vec_in![arena, place.to_irep(arena, mm), place.typ().nondet().to_irep(arena, mm)])
+                    .with_comment(arena, "deinit")
+            }
+            StmtBody::Expression(e) => code_irep(arena, IrepId::Expression, vec_in![arena, e.to_irep(arena, mm)]),
+            StmtBody::For { init, cond, update, body } => code_irep(
+                arena, 
+                IrepId::For,
+                vec_in![arena, init.to_irep(arena, mm), cond.to_irep(arena, mm), update.to_irep(arena, mm), body.to_irep(arena, mm)],
+            ),
+            StmtBody::FunctionCall { lhs, function, arguments } => code_irep(
+                arena, 
+                IrepId::FunctionCall,
+                vec_in![arena, 
+                    lhs.as_ref().map_or(Irep::nil(arena), |x| x.to_irep(arena, mm)),
+                    function.to_irep(arena, mm),
+                    arguments_irep(arena, arguments.iter(), mm),
+                ],
+            ),
+            StmtBody::Goto { dest, loop_invariants } => {
+                let stmt_goto = code_irep(arena, IrepId::Goto, vec_in![arena])
+                    .with_named_sub(IrepId::Destination, Irep::just_string_id(arena, dest.to_string()));
+                if let Some(inv) = loop_invariants {
+                    stmt_goto.with_named_sub(
+                        IrepId::CSpecLoopInvariant,
+                        inv.clone().and(Expr::bool_true()).to_irep(arena, mm),
+                    )
+                } else {
+                    stmt_goto
+                }
+            }
+            StmtBody::Ifthenelse { i, t, e } => code_irep(
+                arena, 
+                IrepId::Ifthenelse,
+                vec_in![arena, 
+                    i.to_irep(arena, mm),
+                    t.to_irep(arena, mm),
+                    e.as_ref().map_or(Irep::nil(arena), |x| x.to_irep(arena, mm)),
+                ],
+            ),
+            StmtBody::Label { label, body } => code_irep(arena, IrepId::Label, vec_in![arena, body.to_irep(arena, mm)])
+                .with_named_sub(IrepId::Label, Irep::just_string_id(arena, label.to_string())),
+            StmtBody::Return(e) => {
+                code_irep(arena, IrepId::Return, vec_in![arena, e.as_ref().map_or(Irep::nil(arena), |x| x.to_irep(arena, mm))])
+            }
+            StmtBody::Skip => code_irep(arena, IrepId::Skip, vec_in![arena]),
+            StmtBody::Switch { control, cases, default } => {
+                let mut switch_arms: Vec<Irep<'b>, &'b Bump> = collect_into(cases.iter().map(|x| x.to_irep(arena, mm)), arena);
+                if default.is_some() {
+                    switch_arms.push(switch_default_irep(arena, default.as_ref().unwrap(), mm));
+                }
+                code_irep(arena, 
+                    IrepId::Switch,
+                    vec_in![arena, control.to_irep(arena, mm), code_irep(arena, IrepId::Block, switch_arms)],
+                )
+            }
+            StmtBody::While { cond, body } => {
+                code_irep(arena, IrepId::While, vec_in![arena, cond.to_irep(arena, mm), body.to_irep(arena, mm)])
+            }
+        }
     }
 }
 
@@ -720,6 +848,226 @@ impl goto_program::SymbolTable {
             st.insert(value.to_irep(arena, mm))
         }
         st
+    }
+}
+
+impl Type {
+    fn into_irep<'b>(self, arena: &'b Bump, mm: &MachineModel) -> Irep<'b> {
+        match self {
+            Type::Array { typ, size } => {
+                //CBMC expects the size to be a signed int constant.
+                let size = Expr::int_constant(size, Type::ssize_t());
+                Irep {
+                    id: IrepId::Array,
+                    sub: vec_in![arena, typ.to_irep(arena, mm)],
+                    named_sub: linear_map![(IrepId::Size, size.to_irep(arena, mm))],
+                }
+            }
+            //TODO make from_irep that matches this.
+            Type::CBitField { typ, width } => Irep {
+                id: IrepId::CBitField,
+                sub: vec_in![arena, typ.to_irep(arena, mm)],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, width))],
+            },
+            Type::Bool => Irep::just_id(arena, IrepId::Bool),
+            Type::CInteger(CIntType::Bool) => Irep {
+                id: IrepId::CBool,
+                sub: vec_in![arena],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, mm.bool_width))],
+            },
+            Type::CInteger(CIntType::Char) => Irep {
+                id: if mm.char_is_unsigned { IrepId::Unsignedbv } else { IrepId::Signedbv },
+                sub: vec_in![arena],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, mm.char_width),)],
+            },
+            Type::CInteger(CIntType::Int) => Irep {
+                id: IrepId::Signedbv,
+                sub: vec_in![arena],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, mm.int_width),)],
+            },
+            Type::CInteger(CIntType::LongInt) => Irep {
+                id: IrepId::Signedbv,
+                sub: vec_in![arena],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, mm.long_int_width),)],
+            },
+            Type::CInteger(CIntType::SizeT) => Irep {
+                id: IrepId::Unsignedbv,
+                sub: vec_in![arena],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, mm.pointer_width),)],
+            },
+            Type::CInteger(CIntType::SSizeT) => Irep {
+                id: IrepId::Signedbv,
+                sub: vec_in![arena],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, mm.pointer_width),)],
+            },
+            Type::Code { parameters, return_type } => Irep {
+                id: IrepId::Code,
+                sub: vec_in![arena],
+                named_sub: linear_map![
+                    (
+                        IrepId::Parameters,
+                        Irep::just_sub(collect_into(parameters.iter().map(|x| x.to_irep(arena, mm)), arena)),
+                    ),
+                    (IrepId::ReturnType, return_type.to_irep(arena, mm)),
+                ],
+            },
+            Type::Constructor => Irep::just_id(arena, IrepId::Constructor),
+            Type::Double => Irep {
+                id: IrepId::Floatbv,
+                sub: vec_in![arena],
+                named_sub: linear_map![
+                    (IrepId::F, Irep::just_int_id(arena, 52)),
+                    (IrepId::Width, Irep::just_int_id(arena, 64)),
+                    (IrepId::CCType, Irep::just_id(arena, IrepId::Double)),
+                ],
+            },
+            Type::Empty => Irep::just_id(arena, IrepId::Empty),
+            // CMBC currently represents these as 0 length arrays.
+            Type::FlexibleArray { typ } => {
+                //CBMC expects the size to be a signed int constant.
+                let size = Type::ssize_t().zero();
+                Irep {
+                    id: IrepId::Array,
+                    sub: vec_in![arena, typ.to_irep(arena, mm)],
+                    named_sub: linear_map![(IrepId::Size, size.to_irep(arena, mm))],
+                }
+            }
+            Type::Float => Irep {
+                id: IrepId::Floatbv,
+                sub: vec_in![arena],
+                named_sub: linear_map![
+                    (IrepId::F, Irep::just_int_id(arena, 23)),
+                    (IrepId::Width, Irep::just_int_id(arena, 32)),
+                    (IrepId::CCType, Irep::just_id(arena, IrepId::Float)),
+                ],
+            },
+            Type::Float16 => Irep {
+                id: IrepId::Floatbv,
+                sub: vec_in![arena],
+                // Fraction bits: 10
+                // Exponent width bits: 5
+                // Sign bit: 1
+                named_sub: linear_map![
+                    (IrepId::F, Irep::just_int_id(arena, 10)),
+                    (IrepId::Width, Irep::just_int_id(arena, 16)),
+                    (IrepId::CCType, Irep::just_id(arena, IrepId::Float16)),
+                ],
+            },
+            Type::Float128 => Irep {
+                id: IrepId::Floatbv,
+                sub: vec_in![arena],
+                // Fraction bits: 112
+                // Exponent width bits: 15
+                // Sign bit: 1
+                named_sub: linear_map![
+                    (IrepId::F, Irep::just_int_id(arena, 112)),
+                    (IrepId::Width, Irep::just_int_id(arena, 128)),
+                    (IrepId::CCType, Irep::just_id(arena, IrepId::Float128)),
+                ],
+            },
+            Type::IncompleteStruct { tag } => Irep {
+                id: IrepId::Struct,
+                sub: vec_in![arena],
+                named_sub: linear_map![
+                    (IrepId::Tag, Irep::just_string_id(arena, tag.to_string())),
+                    (IrepId::Incomplete, Irep::one(arena)),
+                ],
+            },
+            Type::IncompleteUnion { tag } => Irep {
+                id: IrepId::Union,
+                sub: vec_in![arena],
+                named_sub: linear_map![
+                    (IrepId::Tag, Irep::just_string_id(arena, tag.to_string())),
+                    (IrepId::Incomplete, Irep::one(arena)),
+                ],
+            },
+            Type::InfiniteArray { typ } => {
+                let infinity = Irep::just_id(arena, IrepId::Infinity).with_type(&Type::ssize_t(), mm);
+                Irep {
+                    id: IrepId::Array,
+                    sub: vec_in![arena, typ.to_irep(arena, mm)],
+                    named_sub: linear_map![(IrepId::Size, infinity)],
+                }
+            }
+            Type::Integer => Irep::just_id(arena, IrepId::Integer),
+            Type::Pointer { typ } => Irep {
+                id: IrepId::Pointer,
+                sub: vec_in![arena, typ.to_irep(arena, mm)],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, mm.pointer_width),)],
+            },
+            Type::Signedbv { width } => Irep {
+                id: IrepId::Signedbv,
+                sub: vec_in![arena],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, width))],
+            },
+            Type::Struct { tag, components } => Irep {
+                id: IrepId::Struct,
+                sub: vec_in![arena],
+                named_sub: linear_map![
+                    (IrepId::Tag, Irep::just_string_id(arena, tag.to_string())),
+                    (
+                        IrepId::Components,
+                        Irep::just_sub(collect_into(components.iter().map(|x| x.to_irep(arena, mm)), arena)),
+                    ),
+                ],
+            },
+            Type::StructTag(name) => Irep {
+                id: IrepId::StructTag,
+                sub: vec_in![arena],
+                named_sub: linear_map![(
+                    IrepId::Identifier,
+                    Irep::just_string_id(arena, name.to_string()),
+                )],
+            },
+            Type::TypeDef { name, typ } => typ
+                .to_irep(arena, mm)
+                .with_named_sub(IrepId::CTypedef, Irep::just_string_id(arena, name.to_string())),
+
+            Type::Union { tag, components } => Irep {
+                id: IrepId::Union,
+                sub: vec_in![arena],
+                named_sub: linear_map![
+                    (IrepId::Tag, Irep::just_string_id(arena, tag.to_string())),
+                    (
+                        IrepId::Components,
+                        Irep::just_sub(collect_into(components.iter().map(|x| x.to_irep(arena, mm)), arena)),
+                    ),
+                ],
+            },
+            Type::UnionTag(name) => Irep {
+                id: IrepId::UnionTag,
+                sub: vec_in![arena],
+                named_sub: linear_map![(
+                    IrepId::Identifier,
+                    Irep::just_string_id(arena, name.to_string()),
+                )],
+            },
+            Type::Unsignedbv { width } => Irep {
+                id: IrepId::Unsignedbv,
+                sub: vec_in![arena],
+                named_sub: linear_map![(IrepId::Width, Irep::just_int_id(arena, *width))],
+            },
+            Type::VariadicCode { parameters, return_type } => Irep {
+                id: IrepId::Code,
+                sub: vec_in![arena],
+                named_sub: linear_map![
+                    (
+                        IrepId::Parameters,
+                        Irep::just_sub(collect_into(parameters.iter().map(|x| x.to_irep(arena, mm)), arena))
+                            .with_named_sub(IrepId::Ellipsis, Irep::one(arena)),
+                    ),
+                    (IrepId::ReturnType, return_type.to_irep(arena, mm)),
+                ],
+            },
+            Type::Vector { typ, size } => {
+                let size = Expr::int_constant(size, Type::ssize_t());
+                Irep {
+                    id: IrepId::Vector,
+                    sub: vec_in![arena, typ.to_irep(arena, mm)],
+                    named_sub: linear_map![(IrepId::Size, size.to_irep(arena, mm))],
+                }
+            }
+        }
     }
 }
 
