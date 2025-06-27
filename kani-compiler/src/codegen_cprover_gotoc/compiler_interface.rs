@@ -46,6 +46,7 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs::File;
+use std::io::Write as _;
 use std::io::BufWriter;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
@@ -284,6 +285,7 @@ impl CodegenBackend for GotocCodegenBackend {
     }
 
     fn codegen_crate(&self, tcx: TyCtxt) -> Box<dyn Any> {
+        let codegen_start = Instant::now();
         let ret_val = rustc_internal::run(tcx, || {
             super::utils::init();
 
@@ -411,6 +413,16 @@ impl CodegenBackend for GotocCodegenBackend {
             }
             codegen_results(tcx, &results.machine_model)
         });
+        if std::env::var("TIME_COMPILER").is_ok() {
+            let name = tcx.crate_name(LOCAL_CRATE);
+            // let s = ;
+            let mut file = std::fs::OpenOptions::new()
+                .create(true)  // Create file if it doesn't exist
+                .append(true)  // Open in append mode
+                .open("out.txt").unwrap();
+            write!(file, "CODEGEN of {name:?} TOOK {:?}", codegen_start.elapsed()).unwrap();
+            // file.write_all(s).unwrap();
+        }
         ret_val.unwrap()
     }
 
