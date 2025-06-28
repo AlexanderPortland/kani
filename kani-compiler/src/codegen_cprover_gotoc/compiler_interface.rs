@@ -46,8 +46,8 @@ use std::any::Any;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs::File;
-use std::io::Write as _;
 use std::io::BufWriter;
+use std::io::Write as _;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -417,9 +417,10 @@ impl CodegenBackend for GotocCodegenBackend {
             let name = tcx.crate_name(LOCAL_CRATE);
             // let s = ;
             let mut file = std::fs::OpenOptions::new()
-                .create(true)  // Create file if it doesn't exist
-                .append(true)  // Open in append mode
-                .open("out.txt").unwrap();
+                .create(true) // Create file if it doesn't exist
+                .append(true) // Open in append mode
+                .open("out.txt")
+                .unwrap();
             write!(file, "CODEGEN of {name:?} TOOK {:?}", codegen_start.elapsed()).unwrap();
             // file.write_all(s).unwrap();
         }

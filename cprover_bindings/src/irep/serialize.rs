@@ -4,6 +4,7 @@
 use crate::InternedString;
 use crate::irep::{Irep, IrepId, Symbol, SymbolTable};
 use bumpalo::Bump;
+use hashbrown::{DefaultHashBuilder, HashMap};
 use serde::Serialize;
 use serde::ser::{SerializeMap, Serializer};
 
@@ -18,9 +19,24 @@ impl<'b> Serialize for Irep<'b> {
             obj.serialize_entry("sub", &VecWrapper(&self.sub))?;
         }
         if !self.named_sub.is_empty() {
-            obj.serialize_entry("namedSub", &self.named_sub)?;
+            obj.serialize_entry("namedSub", &HashMapWrapper(&self.named_sub))?;
         }
         obj.end()
+    }
+}
+
+pub struct HashMapWrapper<'b>(&'b HashMap<IrepId, Irep<'b>, DefaultHashBuilder, &'b Bump>);
+
+impl Serialize for HashMapWrapper<'_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_map(Some(self.0.len()))?;
+        for (k, v) in self.0 {
+            state.serialize_entry(k, v)?;
+        }
+        state.end()
     }
 }
 
@@ -46,7 +62,7 @@ impl Serialize for SymbolTable<'_> {
     }
 }
 
-pub struct VecWrapper<'b>(pub &'b std::vec::Vec<Irep<'b>, &'b bumpalo::Bump>);
+pub struct VecWrapper<'b>(&'b std::vec::Vec<Irep<'b>, &'b bumpalo::Bump>);
 
 impl<'b> Serialize for VecWrapper<'b> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>

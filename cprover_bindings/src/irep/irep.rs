@@ -6,20 +6,24 @@ use super::super::MachineModel;
 use super::super::goto_program::{Location, Type};
 use super::{IrepId, ToIrep};
 use crate::cbmc_string::InternedString;
-use crate::linear_map;
+use crate::irep::to_irep::hash_collect_into;
+// use crate::linear_map;
 use bumpalo::Bump;
-use linear_map::LinearMap;
+use hashbrown::{DefaultHashBuilder, HashMap};
 use num::BigInt;
+use std::alloc::Allocator;
+use std::borrow::Borrow;
 use std::fmt::Debug;
+use std::mem::ManuallyDrop;
 
 /// The CBMC serialization format for goto-programs.
 /// CBMC implementation code is at:
 /// <https://github.com/diffblue/cbmc/blob/develop/src/util/irep.h>
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 pub struct Irep<'b> {
     pub id: IrepId,
     pub sub: std::mem::ManuallyDrop<Vec<Irep<'b>, &'b Bump>>,
-    pub named_sub: LinearMap<IrepId, Irep<'b>>// TODO: make this jawn a hash map
+    pub named_sub: std::mem::ManuallyDrop<HashMap<IrepId, Irep<'b>, DefaultHashBuilder, &'b Bump>>,
 }
 
 /// Getters
@@ -127,7 +131,11 @@ impl<'b> Irep<'b> {
     }
 
     pub fn just_id(arena: &'b Bump, id: IrepId) -> Irep {
-        Irep { id, sub: std::mem::ManuallyDrop::new(Vec::new_in(arena)), named_sub: LinearMap::new() }
+        Irep {
+            id,
+            sub: std::mem::ManuallyDrop::new(Vec::new_in(arena)),
+            named_sub: std::mem::ManuallyDrop::new(hashbrown::HashMap::new_in(arena)),
+        }
     }
 
     pub fn just_int_id<T>(arena: &'b Bump, i: T) -> Irep
@@ -136,8 +144,15 @@ impl<'b> Irep<'b> {
     {
         Irep::just_id(arena, IrepId::from_int(i))
     }
-    pub fn just_named_sub(arena: &'b Bump, named_sub: LinearMap<IrepId, Irep<'b>>) -> Irep<'b> {
-        Irep { id: IrepId::EmptyString, sub: std::mem::ManuallyDrop::new(Vec::new_in(arena)), named_sub }
+    pub fn just_named_sub(
+        arena: &'b Bump,
+        named_sub: ManuallyDrop<HashMap<IrepId, Irep<'b>, DefaultHashBuilder, &'b Bump>>,
+    ) -> Irep<'b> {
+        Irep {
+            id: IrepId::EmptyString,
+            sub: std::mem::ManuallyDrop::new(Vec::new_in(arena)),
+            named_sub,
+        }
     }
 
     pub fn just_string_id<T: Into<InternedString>>(arena: &'b Bump, s: T) -> Irep {
@@ -145,7 +160,11 @@ impl<'b> Irep<'b> {
     }
 
     pub fn just_sub(sub: std::mem::ManuallyDrop<Vec<Irep<'b>, &'b Bump>>) -> Irep {
-        Irep { id: IrepId::EmptyString, sub: sub, named_sub: LinearMap::new() }
+        Irep {
+            id: IrepId::EmptyString,
+            named_sub: ManuallyDrop::new(hashbrown::HashMap::new_in(sub.allocator())),
+            sub,
+        }
     }
 
     pub fn nil(arena: &'b Bump) -> Irep {
@@ -163,7 +182,10 @@ impl<'b> Irep<'b> {
     pub fn tuple(sub: std::mem::ManuallyDrop<Vec<Irep<'b>, &'b Bump>>) -> Self {
         Irep {
             id: IrepId::Tuple,
-            named_sub: linear_map![(IrepId::Type, Irep::just_id(sub.allocator(), IrepId::Tuple))],
+            named_sub: hash_collect_into(
+                [(IrepId::Type, Irep::just_id(sub.allocator(), IrepId::Tuple))],
+                sub.allocator(),
+            ),
             sub,
         }
     }
