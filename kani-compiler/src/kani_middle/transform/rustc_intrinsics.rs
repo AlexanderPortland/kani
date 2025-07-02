@@ -166,7 +166,7 @@ impl MutMirVisitor for ReplaceIntrinsicCallVisitor<'_> {
             debug!(?intrinsic, "handle_terminator");
             let model = match intrinsic {
                 Intrinsic::SizeOfVal => self.models[&KaniModel::SizeOfVal],
-                Intrinsic::MinAlignOfVal => self.models[&KaniModel::AlignOfVal],
+                Intrinsic::AlignOfVal => self.models[&KaniModel::AlignOfVal],
                 Intrinsic::PtrOffsetFrom => self.models[&KaniModel::PtrOffsetFrom],
                 Intrinsic::PtrOffsetFromUnsigned => self.models[&KaniModel::PtrOffsetFromUnsigned],
                 // The rest is handled in codegen.
