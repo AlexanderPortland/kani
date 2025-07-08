@@ -21,6 +21,16 @@ pub struct Irep {
     pub named_sub: LinearMap<IrepId, Irep>,
 }
 
+impl Drop for Irep {
+    fn drop(&mut self) {
+        let sub = std::mem::take(&mut self.sub);
+        let named_sub = std::mem::take(&mut self.named_sub);
+
+        std::mem::forget(sub);
+        std::mem::forget(named_sub);
+    }
+}
+
 /// Getters
 impl Irep {
     pub fn lookup(&self, key: IrepId) -> Option<&Irep> {
