@@ -89,6 +89,7 @@ use std::hash::Hash;
 use std::io::{self, BufReader};
 use std::io::{BufWriter, Bytes, Error, Read, Write};
 use std::path::Path;
+use std::time::Instant;
 
 /// Writes a symbol table to a file in goto binary format in version 6.
 ///
@@ -101,8 +102,13 @@ pub fn write_goto_binary_file(filename: &Path, source: &crate::goto_program::Sym
     let out_file = File::create(filename).unwrap();
     let mut writer = BufWriter::new(out_file);
     let mut serializer = GotoBinarySerializer::new(&mut writer);
-    let irep_symbol_table = &source.to_irep();
-    serializer.write_file(irep_symbol_table);
+    let irep_symbol_table = source.to_irep();
+    serializer.write_file(&irep_symbol_table);
+
+    let start = Instant::now();
+    drop(irep_symbol_table);
+    let elapsed = start.elapsed();
+    println!("dropped in {:?}", elapsed);
 }
 
 /// Reads a symbol table from a file expected to be in goto binary format in version 6.
