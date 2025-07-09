@@ -3,9 +3,11 @@
 
 use anyhow::{Result, bail};
 use std::path::Path;
-use tracing::{debug, trace};
+// use tracing::{debug, trace};
 
-use kani_metadata::{HarnessMetadata, InternedString, TraitDefinedMethod, VtableCtxResults};
+use kani_metadata::{
+    HarnessMetadata, InternedString, TraitDefinedMethod, VtableCtxResults, find_proof_harnesses,
+};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -140,44 +142,6 @@ pub fn sort_harnesses_by_loc<'a>(harnesses: &[&'a HarnessMetadata]) -> Vec<&'a H
             .then(harness1.original_start_line.cmp(&harness2.original_start_line).reverse())
     });
     harnesses_clone
-}
-
-/// Search for a proof harness with a particular name.
-/// At the present time, we use `no_mangle` so collisions shouldn't happen,
-/// but this function is written to be robust against that changing in the future.
-fn find_proof_harnesses<'a>(
-    targets: &BTreeSet<&String>,
-    all_harnesses: &[&'a HarnessMetadata],
-    exact_filter: bool,
-) -> Vec<&'a HarnessMetadata> {
-    debug!(?targets, "find_proof_harness");
-    let mut result = vec![];
-    for md in all_harnesses.iter() {
-        // --harnesses should not select automatic harnesses
-        if md.is_automatically_generated {
-            continue;
-        }
-        if exact_filter {
-            // Check for exact match only
-            if targets.contains(&md.pretty_name) {
-                // if exact match found, stop searching
-                result.push(*md);
-            } else {
-                trace!(skip = md.pretty_name, "find_proof_harnesses");
-            }
-        } else {
-            // Either an exact match, or a substring match. We check the exact first since it's cheaper.
-            if targets.contains(&md.pretty_name)
-                || targets.contains(&md.get_harness_name_unqualified().to_string())
-                || targets.iter().any(|target| md.pretty_name.contains(*target))
-            {
-                result.push(*md);
-            } else {
-                trace!(skip = md.pretty_name, "find_proof_harnesses");
-            }
-        }
-    }
-    result
 }
 
 #[cfg(test)]
