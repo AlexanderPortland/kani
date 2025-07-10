@@ -3,7 +3,7 @@
 
 use crate::CbmcSolver;
 use serde::{Deserialize, Serialize};
-use std::{borrow::Borrow, collections::BTreeSet, path::PathBuf};
+use std::path::PathBuf;
 use strum_macros::Display;
 
 /// A CBMC-level `assigns` contract that needs to be enforced on a function.
@@ -113,46 +113,30 @@ impl HarnessMetadata {
     }
 }
 
-/// Search for a proof harness with a particular name.
-/// At the present time, we use `no_mangle` so collisions shouldn't happen,
-/// but this function is written to be robust against that changing in the future.
-pub fn find_proof_harnesses<'a, I>(
-    targets: &BTreeSet<&String>,
-    all_harnesses: I,
-    exact_filter: bool,
-) -> Vec<&'a HarnessMetadata>
-where
-    I: IntoIterator,
-    I::Item: Borrow<&'a HarnessMetadata>,
-{
-    // debug!(?targets, "find_proof_harness");
-    let mut result = vec![];
-    for md in all_harnesses.into_iter() {
-        let md: &'a HarnessMetadata = md.borrow();
+pub mod test_utils {
+    use super::{HarnessAttributes, HarnessKind, HarnessMetadata};
+    use std::path::PathBuf;
 
-        // --harnesses should not select automatic harnesses
-        if md.is_automatically_generated {
-            continue;
-        }
-        if exact_filter {
-            // Check for exact match only
-            if targets.contains(&md.pretty_name) {
-                // if exact match found, stop searching
-                result.push(md);
-            } else {
-                // trace!(skip = md.pretty_name, "find_proof_harnesses");
-            }
-        } else {
-            // Either an exact match, or a substring match. We check the exact first since it's cheaper.
-            if targets.contains(&md.pretty_name)
-                || targets.contains(&md.get_harness_name_unqualified().to_string())
-                || targets.iter().any(|target| md.pretty_name.contains(*target))
-            {
-                result.push(md);
-            } else {
-                // trace!(skip = md.pretty_name, "find_proof_harnesses");
-            }
+    pub fn mock_proof_harness(
+        name: &str,
+        unwind_value: Option<u32>,
+        krate: Option<&str>,
+        model_file: Option<PathBuf>,
+    ) -> HarnessMetadata {
+        let mut attributes = HarnessAttributes::new(HarnessKind::Proof);
+        attributes.unwind_value = unwind_value;
+        HarnessMetadata {
+            pretty_name: name.into(),
+            mangled_name: name.into(),
+            crate_name: krate.unwrap_or("<unknown>").into(),
+            original_file: "<unknown>".into(),
+            original_start_line: 0,
+            original_end_line: 0,
+            attributes,
+            goto_file: model_file,
+            contract: Default::default(),
+            has_loop_contracts: false,
+            is_automatically_generated: false,
         }
     }
-    result
 }

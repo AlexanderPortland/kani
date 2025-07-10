@@ -21,7 +21,7 @@ use crate::kani_queries::QueryDb;
 use fxhash::{FxHashMap, FxHashSet};
 use kani_metadata::{
     ArtifactType, AssignsContract, AutoHarnessMetadata, AutoHarnessSkipReason, HarnessKind,
-    HarnessMetadata, KaniMetadata, find_proof_harnesses,
+    HarnessMetadata, KaniMetadata,
 };
 use regex::RegexSet;
 use rustc_hir::def_id::DefId;
@@ -31,12 +31,13 @@ use rustc_smir::rustc_internal;
 use stable_mir::mir::mono::Instance;
 use stable_mir::ty::{FnDef, GenericArgKind, GenericArgs, IndexedVal, RigidTy, Ty, TyKind};
 use stable_mir::{CrateDef, CrateItem};
+use std::borrow::Borrow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// An identifier for the harness function.
 pub type Harness = Instance;
@@ -356,8 +357,56 @@ fn determine_targets(
         exact_filter,
     );
 
+    println!("valid harnesses {:?} from values {:?}, targets {:?} and exact {:?}", valid_harnesses.iter().map(|a|a.pretty_name.clone()).collect::<Vec<_>>(), harnesses.values().map(|a|a.pretty_name.clone()).collect::<Vec<_>>(), harness_filters, exact_filter);
+    println!("valid harnesses {:?} from targets {:?} and exact {:?}", valid_harnesses, harness_filters, exact_filter);
+    panic!();
+
     new_harnesses.retain(|_, metadata| valid_harnesses.contains(&&*metadata));
     new_harnesses
+}
+
+/// Search for a proof harness with a particular name.
+/// At the present time, we use `no_mangle` so collisions shouldn't happen,
+/// but this function is written to be robust against that changing in the future.
+pub fn find_proof_harnesses<'a, I>(
+    targets: &BTreeSet<&String>,
+    all_harnesses: I,
+    exact_filter: bool,
+) -> Vec<&'a HarnessMetadata>
+where
+    I: IntoIterator,
+    I::Item: Borrow<&'a HarnessMetadata>,
+{
+    debug!(?targets, "find_proof_harness");
+    let mut result = vec![];
+    for md in all_harnesses.into_iter() {
+        let md: &'a HarnessMetadata = md.borrow();
+
+        // --harnesses should not select automatic harnesses
+        if md.is_automatically_generated {
+            continue;
+        }
+        if exact_filter {
+            // Check for exact match only
+            if targets.contains(&md.pretty_name) {
+                // if exact match found, stop searching
+                result.push(md);
+            } else {
+                trace!(skip = md.pretty_name, "find_proof_harnesses");
+            }
+        } else {
+            // Either an exact match, or a substring match. We check the exact first since it's cheaper.
+            if targets.contains(&md.pretty_name)
+                || targets.contains(&md.get_harness_name_unqualified().to_string())
+                || targets.iter().any(|target| md.pretty_name.contains(*target))
+            {
+                result.push(md);
+            } else {
+                trace!(skip = md.pretty_name, "find_proof_harnesses");
+            }
+        }
+    }
+    result
 }
 
 /// For each function eligible for automatic verification,
@@ -693,5 +742,97 @@ mod autoharness_filter_tests {
         assert!(!autoharness_filtered_out("num::<impl i8>::wrapping_sh", &included, &excluded));
         assert!(!autoharness_filtered_out("num::<impl i8>::wrapping_add", &included, &excluded));
         assert!(autoharness_filtered_out("num::<impl i16>::wrapping_sh", &included, &excluded));
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use kani_metadata::harness_test_utils::mock_proof_harness;
+
+    #[test]
+    fn check_find_proof_harness_without_exact() {
+        let harnesses = vec![
+            mock_proof_harness("check_one", None, None, None),
+            mock_proof_harness("module::check_two", None, None, None),
+            mock_proof_harness("module::not_check_three", None, None, None),
+        ];
+        let ref_harnesses = harnesses.iter().collect::<Vec<_>>();
+
+        // Check with harness filtering
+        assert_eq!(
+            find_proof_harnesses(
+                &BTreeSet::from([&"check_three".to_string()]),
+                &ref_harnesses,
+                false,
+            )
+            .len(),
+            1
+        );
+        assert!(
+            find_proof_harnesses(
+                &BTreeSet::from([&"check_two".to_string()]),
+                &ref_harnesses,
+                false,
+            )
+            .first()
+            .unwrap()
+            .mangled_name
+                == "module::check_two"
+        );
+        assert!(
+            find_proof_harnesses(
+                &BTreeSet::from([&"check_one".to_string()]),
+                &ref_harnesses,
+                false,
+            )
+            .first()
+            .unwrap()
+            .mangled_name
+                == "check_one"
+        );
+    }
+
+    #[test]
+    fn check_find_proof_harness_with_exact() {
+        // Check with exact match
+
+        let harnesses = vec![
+            mock_proof_harness("check_one", None, None, None),
+            mock_proof_harness("module::check_two", None, None, None),
+            mock_proof_harness("module::not_check_three", None, None, None),
+        ];
+        let ref_harnesses = harnesses.iter().collect::<Vec<_>>();
+
+        assert!(
+            find_proof_harnesses(
+                &BTreeSet::from([&"check_three".to_string()]),
+                &ref_harnesses,
+                true,
+            )
+            .is_empty()
+        );
+        assert!(
+            find_proof_harnesses(&BTreeSet::from([&"check_two".to_string()]), &ref_harnesses, true)
+                .is_empty()
+        );
+        assert_eq!(
+            find_proof_harnesses(&BTreeSet::from([&"check_one".to_string()]), &ref_harnesses, true)
+                .first()
+                .unwrap()
+                .mangled_name,
+            "check_one"
+        );
+        assert_eq!(
+            find_proof_harnesses(
+                &BTreeSet::from([&"module::not_check_three".to_string()]),
+                &ref_harnesses,
+                true,
+            )
+            .first()
+            .unwrap()
+            .mangled_name,
+            "module::not_check_three"
+        );
     }
 }

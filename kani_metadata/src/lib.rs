@@ -21,6 +21,8 @@ mod harness;
 pub mod unstable;
 mod vtable;
 
+pub use harness::test_utils as harness_test_utils;
+
 pub use unstable::{EnabledUnstableFeatures, UnstableFeature};
 
 /// The structure of `.kani-metadata.json` files, which are emitted for each crate

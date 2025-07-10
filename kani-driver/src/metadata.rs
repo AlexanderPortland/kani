@@ -5,9 +5,7 @@ use anyhow::{Result, bail};
 use std::path::Path;
 // use tracing::{debug, trace};
 
-use kani_metadata::{
-    HarnessMetadata, InternedString, TraitDefinedMethod, VtableCtxResults, find_proof_harnesses,
-};
+use kani_metadata::{HarnessMetadata, InternedString, TraitDefinedMethod, VtableCtxResults};
 use std::collections::{BTreeSet, HashMap};
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
@@ -93,39 +91,31 @@ impl KaniSession {
     /// Determine which function to use as entry point, based on command-line arguments and kani-metadata.
     pub fn determine_targets<'a>(
         &self,
-        all_harnesses: &[&'a HarnessMetadata],
+        all_harnesses: Vec<&'a HarnessMetadata>,
     ) -> Result<Vec<&'a HarnessMetadata>> {
         let harnesses = BTreeSet::from_iter(self.args.harnesses.iter());
-        let total_harnesses = harnesses.len();
         let all_targets = &harnesses;
 
-        if harnesses.is_empty() {
-            Ok(Vec::from(all_harnesses))
-        } else {
-            let harnesses_found: Vec<&HarnessMetadata> =
-                find_proof_harnesses(&harnesses, all_harnesses, self.args.exact);
+        // If not even one harness was found with --exact, return an error to user
+        if self.args.exact && all_harnesses.is_empty() {
+            let harness_found_names: BTreeSet<&String> =
+                all_harnesses.iter().map(|&h| &h.pretty_name).collect();
 
-            // If even one harness was not found with --exact, return an error to user
-            if self.args.exact && harnesses_found.len() < total_harnesses {
-                let harness_found_names: BTreeSet<&String> =
-                    harnesses_found.iter().map(|&h| &h.pretty_name).collect();
+            // Check which harnesses are missing from the difference of targets and harnesses_found
+            let harnesses_missing: Vec<&String> =
+                all_targets.difference(&harness_found_names).cloned().collect();
+            let joined_string = harnesses_missing
+                .iter()
+                .map(|&s| (*s).clone())
+                .collect::<Vec<String>>()
+                .join("`, `");
 
-                // Check which harnesses are missing from the difference of targets and harnesses_found
-                let harnesses_missing: Vec<&String> =
-                    all_targets.difference(&harness_found_names).cloned().collect();
-                let joined_string = harnesses_missing
-                    .iter()
-                    .map(|&s| (*s).clone())
-                    .collect::<Vec<String>>()
-                    .join("`, `");
-
-                bail!(
-                    "Failed to match the following harness(es):\n{joined_string}\nPlease specify the fully-qualified name of a harness.",
-                );
-            }
-
-            Ok(harnesses_found)
+            bail!(
+                "Failed to match the following harness(es):\n`{joined_string}`\nPlease specify the fully-qualified name of a harness.",
+            );
         }
+
+        Ok(all_harnesses)
     }
 }
 
@@ -142,120 +132,4 @@ pub fn sort_harnesses_by_loc<'a>(harnesses: &[&'a HarnessMetadata]) -> Vec<&'a H
             .then(harness1.original_start_line.cmp(&harness2.original_start_line).reverse())
     });
     harnesses_clone
-}
-
-#[cfg(test)]
-pub mod tests {
-    use super::*;
-    use kani_metadata::{HarnessAttributes, HarnessKind};
-    use std::path::PathBuf;
-
-    pub fn mock_proof_harness(
-        name: &str,
-        unwind_value: Option<u32>,
-        krate: Option<&str>,
-        model_file: Option<PathBuf>,
-    ) -> HarnessMetadata {
-        let mut attributes = HarnessAttributes::new(HarnessKind::Proof);
-        attributes.unwind_value = unwind_value;
-        HarnessMetadata {
-            pretty_name: name.into(),
-            mangled_name: name.into(),
-            crate_name: krate.unwrap_or("<unknown>").into(),
-            original_file: "<unknown>".into(),
-            original_start_line: 0,
-            original_end_line: 0,
-            attributes,
-            goto_file: model_file,
-            contract: Default::default(),
-            has_loop_contracts: false,
-            is_automatically_generated: false,
-        }
-    }
-
-    #[test]
-    fn check_find_proof_harness_without_exact() {
-        let harnesses = vec![
-            mock_proof_harness("check_one", None, None, None),
-            mock_proof_harness("module::check_two", None, None, None),
-            mock_proof_harness("module::not_check_three", None, None, None),
-        ];
-        let ref_harnesses = harnesses.iter().collect::<Vec<_>>();
-
-        // Check with harness filtering
-        assert_eq!(
-            find_proof_harnesses(
-                &BTreeSet::from([&"check_three".to_string()]),
-                &ref_harnesses,
-                false,
-            )
-            .len(),
-            1
-        );
-        assert!(
-            find_proof_harnesses(
-                &BTreeSet::from([&"check_two".to_string()]),
-                &ref_harnesses,
-                false,
-            )
-            .first()
-            .unwrap()
-            .mangled_name
-                == "module::check_two"
-        );
-        assert!(
-            find_proof_harnesses(
-                &BTreeSet::from([&"check_one".to_string()]),
-                &ref_harnesses,
-                false,
-            )
-            .first()
-            .unwrap()
-            .mangled_name
-                == "check_one"
-        );
-    }
-
-    #[test]
-    fn check_find_proof_harness_with_exact() {
-        // Check with exact match
-
-        let harnesses = vec![
-            mock_proof_harness("check_one", None, None, None),
-            mock_proof_harness("module::check_two", None, None, None),
-            mock_proof_harness("module::not_check_three", None, None, None),
-        ];
-        let ref_harnesses = harnesses.iter().collect::<Vec<_>>();
-
-        assert!(
-            find_proof_harnesses(
-                &BTreeSet::from([&"check_three".to_string()]),
-                &ref_harnesses,
-                true,
-            )
-            .is_empty()
-        );
-        assert!(
-            find_proof_harnesses(&BTreeSet::from([&"check_two".to_string()]), &ref_harnesses, true)
-                .is_empty()
-        );
-        assert_eq!(
-            find_proof_harnesses(&BTreeSet::from([&"check_one".to_string()]), &ref_harnesses, true)
-                .first()
-                .unwrap()
-                .mangled_name,
-            "check_one"
-        );
-        assert_eq!(
-            find_proof_harnesses(
-                &BTreeSet::from([&"module::not_check_three".to_string()]),
-                &ref_harnesses,
-                true,
-            )
-            .first()
-            .unwrap()
-            .mangled_name,
-            "module::not_check_three"
-        );
-    }
 }

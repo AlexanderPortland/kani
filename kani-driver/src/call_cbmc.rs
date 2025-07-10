@@ -541,8 +541,8 @@ pub fn resolve_unwind_value(
 #[cfg(test)]
 mod tests {
     use crate::args;
-    use crate::metadata::tests::mock_proof_harness;
     use clap::Parser;
+    use kani_metadata::harness_test_utils::mock_proof_harness;
 
     use super::*;
 

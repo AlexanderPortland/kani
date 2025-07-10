@@ -128,6 +128,7 @@ crate-type = ["lib"]
 
     /// Calls `cargo_build` to generate `*.symtab.json` files in `target_dir`
     pub fn cargo_build(&mut self, keep_going: bool) -> Result<CargoOutputs> {
+        panic!("in cargo build");
         let build_target = env!("TARGET"); // see build.rs
         let metadata = self.cargo_metadata(build_target)?;
         let target_dir = self
