@@ -357,10 +357,6 @@ fn determine_targets(
         exact_filter,
     );
 
-    println!("valid harnesses {:?} from values {:?}, targets {:?} and exact {:?}", valid_harnesses.iter().map(|a|a.pretty_name.clone()).collect::<Vec<_>>(), harnesses.values().map(|a|a.pretty_name.clone()).collect::<Vec<_>>(), harness_filters, exact_filter);
-    println!("valid harnesses {:?} from targets {:?} and exact {:?}", valid_harnesses, harness_filters, exact_filter);
-    panic!();
-
     new_harnesses.retain(|_, metadata| valid_harnesses.contains(&&*metadata));
     new_harnesses
 }

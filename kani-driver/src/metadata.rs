@@ -96,8 +96,13 @@ impl KaniSession {
         let harnesses = BTreeSet::from_iter(self.args.harnesses.iter());
         let all_targets = &harnesses;
 
-        // If not even one harness was found with --exact, return an error to user
-        if self.args.exact && all_harnesses.is_empty() {
+        // For dev builds, re-filter the harnesses to ensure we're doing the minimal harness codegen possible.
+        if cfg!(debug_assertions) {
+            let filtered_harnesses = find_proof_harnesses();
+        }
+
+        // If any of the `--harness` filters failed to find a harness, report that to the user.
+        if self.args.exact && (all_harnesses.len() < self.args.harnesses.len()) {
             let harness_found_names: BTreeSet<&String> =
                 all_harnesses.iter().map(|&h| &h.pretty_name).collect();
 
