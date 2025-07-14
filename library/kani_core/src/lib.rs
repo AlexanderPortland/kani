@@ -327,21 +327,6 @@ macro_rules! kani_intrinsics {
             result
         }
 
-        #[inline(always)]
-        pub fn partition<T: Arbitrary, F>(partition_conditions: impl IntoIterator<Item = F>, closure_to_verify: impl FnOnce(T)) where F: FnOnce(&T) -> bool {
-            let input = T::any();
-            let missing_full_coverage = partition_conditions.into_iter().any(|condition: F| condition(&input));
-
-            assert!(missing_full_coverage);
-
-            // closure_to_verify()
-        }
-
-        #[inline(always)]
-        fn force_partition_well_formedness<T: Arbitrary, F>(partition_conditions: impl IntoIterator<Item = F>, fn_to_verify: impl FnOnce(T))  where F: FnOnce(&T) {
-            // doesn't do anything, but just makes sure input is well formed, or this won't type-check
-        }
-
         /// This function creates a symbolic value of type `T`. This may result in an invalid value.
         ///
         /// # Safety

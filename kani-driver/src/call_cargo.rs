@@ -82,7 +82,6 @@ crate-type = ["lib"]
         rustc_args.push(
             to_rustc_arg(vec!["--ignore-global-asm".to_string(), self.reachability_arg()]).into(),
         );
-        rustc_args.push("-Zmacro-backtrace".into());
 
         let mut cargo_args: Vec<OsString> = vec!["build".into()];
         cargo_args.append(&mut cargo_config_args());
@@ -104,7 +103,7 @@ crate-type = ["lib"]
 
         // Since we are verifying the standard library, we set the reachability to all crates.
         let mut cmd = setup_cargo_command()?;
-        cmd.args(&cargo_args).arg("-Zmacro-backtrace")
+        cmd.args(&cargo_args)
             .current_dir(krate_path)
             .env("RUSTC", &self.kani_compiler)
             // Use CARGO_ENCODED_RUSTFLAGS instead of RUSTFLAGS is preferred. See
