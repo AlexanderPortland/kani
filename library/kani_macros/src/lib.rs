@@ -455,6 +455,7 @@ mod sysroot {
 
     pub use contracts::{ensures, modifies, proof_for_contract, requires, stub_verified};
     pub use loop_contracts::{loop_invariant, loop_modifies};
+    use std::hash::{Hasher, Hash};
 
     use super::*;
 
@@ -490,26 +491,49 @@ mod sysroot {
         };
     }
 
+    #[derive(Debug)]
     struct ProofOptions {
         schedule: Option<syn::Expr>,
+        partitions: Vec<syn::ExprClosure>,
     }
 
     impl Parse for ProofOptions {
         fn parse(input: ParseStream) -> syn::Result<Self> {
-            if input.is_empty() {
-                Ok(ProofOptions { schedule: None })
-            } else {
+            let (mut schedule, mut partitions) = (None, Vec::new());
+            while !input.is_empty() {
                 let ident = input.parse::<syn::Ident>()?;
-                if ident != "schedule" {
-                    abort_call_site!("`{}` is not a valid option for `#[kani::proof]`.", ident;
-                        help = "did you mean `schedule`?";
-                        note = "for now, `schedule` is the only option for `#[kani::proof]`.";
-                    );
+                match ident {
+                    i if i == "schedule" => {
+                        let _ = input.parse::<syn::Token![=]>()?;
+                        schedule = Some(input.parse::<syn::Expr>()?);
+                    },
+                    i if i == "partitions" => {
+                        let _: syn::Token![=] = input.parse()?;
+
+                        let content;
+                        syn::bracketed!(content in input);
+                        
+                        // let mut closures = Vec::new();
+                        while !content.is_empty() {
+                            partitions.push(content.parse()?);
+                            
+                            if content.peek(syn::Token![,]) {
+                                let _: syn::Token![,] = content.parse()?;
+                            }
+                        }
+
+                        println!("got partitions {:?}", partitions);
+                    },
+                    unsupported => {
+                            abort_call_site!("`{}` is not a valid option for `#[kani::proof]`.", unsupported;
+                            help = "did you mean `schedule`?";
+                            note = "for now, `schedule` is the only option for `#[kani::proof]`.";
+                        );
+                    }
                 }
-                let _ = input.parse::<syn::Token![=]>()?;
-                let schedule = Some(input.parse::<syn::Expr>()?);
-                Ok(ProofOptions { schedule })
             }
+
+            Ok(ProofOptions { schedule, partitions })
         }
     }
 
@@ -519,7 +543,10 @@ mod sysroot {
         let attrs = fn_item.attrs;
         let vis = fn_item.vis;
         let sig = fn_item.sig;
+        let ident = &sig.ident;
         let body = fn_item.block;
+
+        // panic!("options are {proof_options:?}");
 
         let kani_attributes = quote!(
             #[allow(dead_code)]
@@ -534,12 +561,67 @@ mod sysroot {
                 );
             }
             // Adds `#[kanitool::proof]` and other attributes
-            quote!(
-                #kani_attributes
-                #(#attrs)*
-                #vis #sig #body
-            )
-            .into()
+            if proof_options.partitions.is_empty() {
+                quote!(
+                        #kani_attributes
+                        #(#attrs)*
+                        #vis #sig #body
+                    )
+                    .into()
+            } else {
+                let input_type = {
+                    match sig.inputs.first() {
+                        Some(syn::FnArg::Typed(t)) => &t.ty,
+                        _ => panic!("partition only works on fns with a single arg"),
+                    }
+                };
+
+                let mut stream = TokenStream::new();
+
+                // add base function
+                let new_fn: TokenStream = quote!(
+                    #(#attrs)*
+                    #vis #sig #body
+                ).into();
+                stream.extend(new_fn);
+
+                let fn_name = quote::format_ident!("{}", format!("{}_partition_has_full_coverage", sig.ident));
+                let a = &proof_options.partitions;
+                let partition_len = proof_options.partitions.len();
+                let new_fn: TokenStream = quote!(
+                    #kani_attributes
+                    pub fn #fn_name() {
+                        let t: #input_type = kani::any();
+                        let partitions: [fn(&#input_type) -> bool; #partition_len] = [#(#a,)*];
+                        let missing_full_coverage: bool = partitions.into_iter().any(|condition| condition(&t));
+                        assert!(missing_full_coverage)
+                    }
+                ).into();
+
+                stream.extend(new_fn);
+
+                for condition in proof_options.partitions {
+
+                    let closure_hash = {
+                        let mut hasher = std::hash::DefaultHasher::new();
+                        condition.hash(&mut hasher);
+                        hasher.finish()
+                    };
+                    let fn_name = quote::format_ident!("{}", format!("{}_{:?}", sig.ident, closure_hash));
+
+                    let new_fn: TokenStream = quote!(
+                        #kani_attributes
+                        pub fn #fn_name() {
+                            let t = kani::any_where(#condition);
+
+                            #ident(t)
+                        }
+                    ).into();
+                    stream.extend(new_fn)
+                }
+                
+                stream
+            }
         } else {
             // For async functions, it translates to a synchronous function that calls `kani::block_on`.
             // Specifically, it translates
