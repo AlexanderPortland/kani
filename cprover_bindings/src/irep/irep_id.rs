@@ -836,6 +836,7 @@ pub enum IrepId {
     VectorGt,
     VectorLt,
     FloatbvRoundToIntegral,
+    ShuffleVector,
 }
 
 impl IrepId {
