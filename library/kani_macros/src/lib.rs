@@ -660,7 +660,7 @@ mod sysroot {
         let attrs = fn_item.attrs;
         let vis = fn_item.vis;
         let sig = fn_item.sig;
-        let ident = &sig.ident;
+        let ident = &sig.ident; // TODO: more descriptive name
         let body = fn_item.block;
 
         let kani_attributes = quote!(
@@ -685,9 +685,18 @@ mod sysroot {
 
             // Adds `#[kanitool::proof]` and other attributes
             let input_type = {
-                match sig.inputs.first() {
-                    Some(syn::FnArg::Typed(t)) => &t.ty,
-                    _ => panic!("partition only works on fns with a single arg"),
+                if sig.inputs.len() != 1 {
+                    panic!(
+                        "partition only works on fns with a single, typed arg -- {} takes {} arguments",
+                        ident,
+                        sig.inputs.len()
+                    );
+                }
+                match sig.inputs.first().unwrap() {
+                    syn::FnArg::Typed(t) => &t.ty,
+                    syn::FnArg::Receiver(r) => panic!(
+                        "partition only works on fns with a single, typed arg and cannot take self -- found reciever {r:?}"
+                    ),
                 }
             };
 
