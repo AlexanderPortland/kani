@@ -497,7 +497,6 @@ mod sysroot {
         };
     }
 
-    #[derive(Debug)]
     struct ProofOptions {
         schedule: Option<syn::Expr>,
     }
@@ -511,6 +510,7 @@ mod sysroot {
         fn parse(input: ParseStream) -> syn::Result<Self> {
             let (mut schedule, mut partitions) = (None, Vec::new());
 
+            // If there's an initial ident option, try parsing it.
             if input.peek(syn::Ident) {
                 let ident = input.parse::<syn::Ident>()?;
                 match ident {
@@ -527,8 +527,9 @@ mod sysroot {
                 }
             }
 
+            // Try parsing comma delimited closures while tokens remain.
             while !input.is_empty() {
-                partitions.push(input.parse()?);
+                partitions.push(input.parse::<syn::ExprClosure>()?);
 
                 if input.peek(syn::Token![,]) {
                     let _: syn::Token![,] = input.parse()?;
@@ -647,6 +648,12 @@ mod sysroot {
         }
     }
 
+    /// Generate a partitioned proof with the given [PartitionedProofOptions]. This will generate three elements:
+    /// 1. the proof body function definition
+    /// 2. per-partition wrapper harnesses that serve as
+    ///    the entrypoints for verification
+    ///    and just call the proof body on a specific subset of inputs
+    /// 3. a proof harness that asserts the partition conditions fully cover the input space
     pub fn partitioned_proof(attr: TokenStream, item: TokenStream) -> TokenStream {
         let proof_options = parse_macro_input!(attr as PartitionedProofOptions);
         let fn_item = parse_macro_input!(item as ItemFn);
@@ -656,15 +663,13 @@ mod sysroot {
         let ident = &sig.ident;
         let body = fn_item.block;
 
-        // panic!("options are {proof_options:?}");
-
         let kani_attributes = quote!(
             #[allow(dead_code)]
             #[kanitool::proof]
         );
 
         if sig.asyncness.is_some() {
-            // probably possible, but for later bc the code looks complicated
+            // probably possible, but TODO for later bc the code looks complicated
             panic!("partitioned proofs are currently not supported on async functions");
         }
 
@@ -675,73 +680,81 @@ mod sysroot {
                     help = "did you mean to make this function `async`?";
                 );
             }
+            // There should be at least one partition
+            assert!(!proof_options.partitions.is_empty());
+
             // Adds `#[kanitool::proof]` and other attributes
-            if proof_options.partitions.is_empty() {
-                quote!(
-                    #kani_attributes
-                    #(#attrs)*
-                    #vis #sig #body
-                )
-                .into()
-            } else {
-                let input_type = {
-                    match sig.inputs.first() {
-                        Some(syn::FnArg::Typed(t)) => &t.ty,
-                        _ => panic!("partition only works on fns with a single arg"),
-                    }
-                };
+            let input_type = {
+                match sig.inputs.first() {
+                    Some(syn::FnArg::Typed(t)) => &t.ty,
+                    _ => panic!("partition only works on fns with a single arg"),
+                }
+            };
 
-                let mut stream = TokenStream::new();
+            let mut stream = TokenStream::new();
 
-                // add base function
-                let new_fn: TokenStream = quote!(
-                    #(#attrs)*
-                    #vis #sig #body
-                )
-                .into();
-                stream.extend(new_fn);
+            // 1. Generate the proof body function.
+            //    This is just the common body that will be called by each of our partitions.
+            let proof_body_fn_def: TokenStream = quote!(
+                #(#attrs)*
+                #vis #sig #body
+            )
+            .into();
 
-                let fn_name = quote::format_ident!(
-                    "{}",
-                    format!("{}_partition_has_full_coverage", sig.ident)
-                );
-                let a = &proof_options.partitions;
-                let partition_len = proof_options.partitions.len();
-                let new_fn: TokenStream = quote!(
-                    #kani_attributes
-                    pub fn #fn_name() {
-                        let t: #input_type = kani::any();
-                        let partitions: [fn(&#input_type) -> bool; #partition_len] = [#(#a,)*];
-                        let missing_full_coverage: bool = partitions.into_iter().any(|condition| condition(&t));
-                        assert!(missing_full_coverage)
-                    }
-                ).into();
-
-                stream.extend(new_fn);
-
-                for condition in proof_options.partitions {
+            // 2. Generate the per-partition wrapper harnesses. These are the actual proofs that will be verified.
+            let partition_harness_fn_defs = proof_options
+                .partitions
+                .iter()
+                .map(|condition| -> TokenStream {
                     let closure_hash = {
                         let mut hasher = std::hash::DefaultHasher::new();
                         condition.hash(&mut hasher);
                         hasher.finish()
                     };
-                    let fn_name =
+                    let harness_name =
                         quote::format_ident!("{}", format!("{}_{:?}", sig.ident, closure_hash));
 
-                    let new_fn: TokenStream = quote!(
+                    quote!(
                         #kani_attributes
-                        pub fn #fn_name() {
+                        pub fn #harness_name() {
                             let t = kani::any_where(#condition);
 
                             #ident(t)
                         }
                     )
-                    .into();
-                    stream.extend(new_fn)
-                }
+                    .into()
+                })
+                .collect::<TokenStream>();
 
-                stream
-            }
+            // 3. Generate a proof harness for proving soundess of partition conditions.
+            let partition_coverage_fn_def: TokenStream = {
+                // These silly `let` declarations are needed because member access isn't possible in the `quote!` macro body.
+                let fn_name = quote::format_ident!(
+                    "{}",
+                    format!("{}_partition_has_full_coverage", sig.ident)
+                );
+                let partition_conds = &proof_options.partitions;
+                let partition_count = proof_options.partitions.len();
+
+                quote!(
+                    #kani_attributes
+                    pub fn #fn_name() {
+                        let val: #input_type = kani::any();
+                        let partitions: [fn(&#input_type) -> bool; #partition_count] = [#(#partition_conds,)*];
+                        let partitions_cover_this_val: bool = partitions.into_iter().any(|condition| condition(&val));
+
+                        // If it's possible for this assert to fail, that means there's a valid `#input_type` 
+                        // that would not fall into any of our partitions, so the partition is not sound.
+                        assert!(partitions_cover_this_val)
+                    }
+                ).into()
+            };
+
+            stream.extend(proof_body_fn_def);
+            stream.extend(partition_coverage_fn_def);
+            stream.extend(partition_harness_fn_defs);
+
+            stream
         } else {
             // For async functions, it translates to a synchronous function that calls `kani::block_on`.
             // Specifically, it translates
