@@ -275,6 +275,17 @@ macro_rules! kani_intrinsics {
             T::any()
         }
 
+        #[inline(always)]
+        pub fn partition<T: Arbitrary, R, const N: usize>(
+            variable: T,
+            conditions: [fn(&T) -> bool; N],
+            and_run: fn(T) -> R,
+        ) -> R {
+            let partition_num = 0;
+            kani::assume(conditions[partition_num](&variable));
+            and_run(variable)
+        }
+
         /// Creates a symbolic value *bounded* by `N`. Bounded means `|T| <= N`. The type
         /// implementing BoundedArbitrary decides exactly what size means for them.
         ///
