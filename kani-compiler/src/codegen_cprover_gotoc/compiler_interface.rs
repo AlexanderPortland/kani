@@ -43,29 +43,34 @@ use stable_mir::CrateDef;
 use stable_mir::mir::mono::{Instance, MonoItem};
 use stable_mir::rustc_internal;
 use std::any::Any;
+use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::Instant;
 use tracing::{debug, info};
 
 pub type UnsupportedConstructs = FxHashMap<InternedString, Vec<Location>>;
 
-#[derive(Clone)]
+// #[derive(Clone)]
 pub struct GotocCodegenBackend {
     /// The query is shared with `KaniCompiler` and it is initialized as part of `rustc`
     /// initialization, which may happen after this object is created.
     /// Since we don't have any guarantees on when the compiler creates the Backend object, neither
     /// in which thread it will be used, we prefer to explicitly synchronize any query access.
     queries: Arc<Mutex<QueryDb>>,
+
+    file_writer_handles: RefCell<Vec<JoinHandle<()>>>,
 }
 
 impl GotocCodegenBackend {
     pub fn new(queries: Arc<Mutex<QueryDb>>) -> Self {
-        GotocCodegenBackend { queries }
+        let file_writer_handles = RefCell::new(Vec::new());
+        GotocCodegenBackend { queries, file_writer_handles }
     }
 
     /// Generate code that is reachable from the given starting points.
@@ -203,13 +208,24 @@ impl GotocCodegenBackend {
         // No output should be generated if user selected no_codegen.
         if !tcx.sess.opts.unstable_opts.no_codegen && tcx.sess.opts.output_types.should_codegen() {
             let pretty = self.queries.lock().unwrap().args().output_pretty_json;
-            write_file(symtab_goto, ArtifactType::PrettyNameMap, &pretty_name_map, pretty);
-            write_goto_binary_file(symtab_goto, &gcx.symbol_table);
-            write_file(symtab_goto, ArtifactType::TypeMap, &type_map, pretty);
-            // If they exist, write out vtable virtual call function pointer restrictions
-            if let Some(restrictions) = vtable_restrictions {
-                write_file(symtab_goto, ArtifactType::VTableRestriction, &restrictions, pretty);
-            }
+            let write_files = {
+                let now = std::time::Instant::now();
+                let symtab_goto = symtab_goto.to_owned();
+                let symbol_table_ref = gcx.symbol_table.clone();
+                println!("cloning symbol table took {:?}", now.elapsed());
+                // panic!();
+                move || {
+                    write_file(&symtab_goto, ArtifactType::PrettyNameMap, &pretty_name_map, pretty);
+                    write_goto_binary_file(&symtab_goto, &symbol_table_ref);
+                    write_file(&symtab_goto, ArtifactType::TypeMap, &type_map, pretty);
+                    // If they exist, write out vtable virtual call function pointer restrictions
+                    if let Some(restrictions) = vtable_restrictions {
+                        write_file(&symtab_goto, ArtifactType::VTableRestriction, &restrictions, pretty);
+                    }
+                }
+            };
+            write_files();
+            // self.file_writer_handles.borrow_mut().push(std::thread::spawn(write_files));
         }
 
         (gcx, items, contract_info)
@@ -390,6 +406,10 @@ impl CodegenBackend for GotocCodegenBackend {
                     assert!(contract_info.is_none());
                     let _ = results.extend(gcx, items, None);
                 }
+            }
+
+            for handle in self.file_writer_handles.take() {
+                handle.join().unwrap();
             }
 
             if reachability != ReachabilityType::None {

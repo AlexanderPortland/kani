@@ -79,7 +79,7 @@
 //! object from the byte stream on the first occurrence.
 
 use crate::irep::{Irep, IrepId, Symbol, SymbolTable};
-use crate::{InternString, InternedString};
+use crate::{cbmc_string, InternString, InternedString};
 #[cfg(not(test))]
 use fxhash::FxHashMap;
 #[cfg(test)]
@@ -102,7 +102,10 @@ pub fn write_goto_binary_file(filename: &Path, source: &crate::goto_program::Sym
     let mut writer = BufWriter::new(out_file);
     let mut serializer = GotoBinarySerializer::new(&mut writer);
     let irep_symbol_table = &source.to_irep();
+    // InternedString::time_clone();
+    let old = InternedString::snapshot_interner();
     serializer.write_file(irep_symbol_table);
+    InternedString::override_interner(old);
 }
 
 /// Reads a symbol table from a file expected to be in goto binary format in version 6.
