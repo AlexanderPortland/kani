@@ -42,6 +42,5 @@ pub mod utils;
 pub use irep::serialize;
 pub use machine_model::{MachineModel, RoundingMode};
 mod cbmc_string;
-pub use cbmc_string::{
-    InternString, InternStringOption, InternedString, InternerSpecific, WithInterner,
-};
+pub use cbmc_string::sync::{InternerSpecific, WithInterner};
+pub use cbmc_string::{InternString, InternStringOption, InternedString};
