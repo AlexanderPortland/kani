@@ -5,9 +5,7 @@
 
 use crate::args::ReachabilityType;
 use crate::codegen_cprover_gotoc::GotocCtx;
-use crate::codegen_cprover_gotoc::worker::{
-    WorkUnit, deinitialize_workers, initialize_workers, send_work,
-};
+use crate::codegen_cprover_gotoc::worker::{WorkUnit, Workers};
 use crate::kani_middle::analysis;
 use crate::kani_middle::attributes::KaniAttributes;
 use crate::kani_middle::check_reachable_items;
@@ -73,7 +71,8 @@ impl GotocCodegenBackend {
     /// Generate code that is reachable from the given starting points.
     ///
     /// Invariant: iff `check_contract.is_some()` then `return.2.is_some()`
-    fn codegen_items<'tcx>(
+    #[allow(clippy::too_many_arguments)]
+    fn codegen_items<'tcx, const NUM_THREADS: usize>(
         &self,
         tcx: TyCtxt<'tcx>,
         starting_items: &[MonoItem],
@@ -81,6 +80,7 @@ impl GotocCodegenBackend {
         machine_model: &MachineModel,
         check_contract: Option<InternalDefId>,
         mut transformer: BodyTransformation,
+        thread_pool: &Workers<NUM_THREADS>,
     ) -> (GotocCtx<'tcx>, Vec<MonoItem>, Option<AssignsContract>) {
         // This runs reachability analysis before global passes are applied.
         //
@@ -215,9 +215,7 @@ impl GotocCodegenBackend {
             );
             let with_interner = WithInterner::new_with_current(new_unit);
 
-            // let (sender, reciever) = channel();
-            send_work(with_interner).unwrap();
-            // println!("just sent work unit to queue (path {symtab_goto:?})... new len is {}", WORKERS.1.lock().as_ref().unwrap().as_ref().unwrap().len());
+            thread_pool.send_work(with_interner).unwrap();
         }
 
         (gcx, items, contract_info)
@@ -338,10 +336,12 @@ impl CodegenBackend for GotocCodegenBackend {
             let reachability = queries.args().reachability_analysis;
             let mut results = GotoCodegenResults::new(tcx, reachability);
 
-            // Only initialize the worker threads if we will be doing codegen on this crate.
-            if reachability != ReachabilityType::None {
-                initialize_workers();
+            // If reachability is None, just return early as we'll do no codegen.
+            if reachability == ReachabilityType::None {
+                return codegen_results(tcx, &results.machine_model);
             }
+
+            let worker_threads = Workers::new();
 
             match reachability {
                 ReachabilityType::AllFns | ReachabilityType::Harnesses => {
@@ -365,6 +365,7 @@ impl CodegenBackend for GotocCodegenBackend {
                                 &results.machine_model,
                                 contract_metadata,
                                 transformer,
+                                &worker_threads,
                             );
                             if gcx.has_loop_contracts {
                                 loop_contracts_instances.push(*harness);
@@ -379,7 +380,7 @@ impl CodegenBackend for GotocCodegenBackend {
                     units.store_loop_contracts(&loop_contracts_instances);
                     units.write_metadata(&queries, tcx);
                 }
-                ReachabilityType::None => {}
+                ReachabilityType::None => unreachable!(),
                 ReachabilityType::PubFns => {
                     let unit = CodegenUnit::default();
                     let transformer = BodyTransformation::new(&queries, tcx, &unit);
@@ -400,6 +401,7 @@ impl CodegenBackend for GotocCodegenBackend {
                         &results.machine_model,
                         Default::default(),
                         transformer,
+                        &worker_threads,
                     );
                     assert!(contract_info.is_none());
                     let _ = results.extend(gcx, items, None);
@@ -407,11 +409,7 @@ impl CodegenBackend for GotocCodegenBackend {
             }
 
             // Worker threads should have only been initialized if we were doing codegen for this crate.
-            if reachability != ReachabilityType::None {
-                let workers =
-                    deinitialize_workers().expect("workers should only be deinitialized once");
-                workers.join_all();
-            }
+            worker_threads.join_all();
 
             if reachability != ReachabilityType::None {
                 // Print compilation report.

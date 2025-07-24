@@ -1,11 +1,9 @@
 // Copyright Kani Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::convert::identity;
 use std::path::PathBuf;
-use std::sync::Mutex;
 use std::sync::mpmc::{Receiver, Sender, channel};
 use std::sync::mpsc::{SendError, TryRecvError};
 use std::thread::JoinHandle;
@@ -47,11 +45,7 @@ impl WorkUnit {
     }
 }
 
-// could also be thread local
 const NUM_WORKERS: usize = 2;
-lazy_static! {
-    pub(crate) static ref WORKERS: Mutex<Option<Workers<NUM_WORKERS>>> = Mutex::new(None);
-}
 
 type WorkerReturn = ();
 
@@ -60,32 +54,27 @@ pub struct Workers<const N: usize> {
     join_handles: [JoinHandle<WorkerReturn>; N],
 }
 
-pub fn initialize_workers() {
-    *WORKERS.lock().unwrap() = Some(Workers::new());
+impl Workers<NUM_WORKERS> {
+    pub fn new() -> Self {
+        let (work_queue_send, work_queue_recv) = channel();
+
+        let join_handles: [JoinHandle<()>; NUM_WORKERS] =
+            core::array::from_fn(identity).map(|_| {
+                let new_work_queue_recv = work_queue_recv.clone();
+                std::thread::spawn(move || {
+                    worker_loop(new_work_queue_recv);
+                })
+            });
+
+        Workers { work_queue: work_queue_send, join_handles }
+    }
 }
 
 type WorkToSend = WithInterner<WorkUnit>;
-pub fn send_work(work: WorkToSend) -> Result<(), Box<SendError<WorkToSend>>> {
-    // box the err output because it's large and this will safe us memory use in the much more common success case
-    WORKERS.lock().unwrap().as_ref().unwrap().work_queue.send(work).map_err(Box::new)
-}
-
-pub fn deinitialize_workers() -> Option<Workers<NUM_WORKERS>> {
-    WORKERS.lock().unwrap().take()
-}
-
 impl<const N: usize> Workers<N> {
-    pub fn new() -> Self {
-        println!("i gotta be honest, im straight up worker threading all over the place...");
-        let (work_queue_send, work_queue_recv) = channel();
-        let join_handles = core::array::from_fn(identity).map(|_| {
-            let new_work_queue_recv = work_queue_recv.clone();
-            std::thread::spawn(move || {
-                worker_loop(new_work_queue_recv);
-            })
-        });
-
-        Workers { work_queue: work_queue_send, join_handles }
+    pub fn send_work(&self, work: WorkToSend) -> Result<(), Box<SendError<WorkToSend>>> {
+        // box the err output because it's large and this will safe us memory use in the much more common success case
+        self.work_queue.send(work).map_err(Box::new)
     }
 
     pub fn join_all(self) {
