@@ -5,7 +5,7 @@
 
 use crate::args::ReachabilityType;
 use crate::codegen_cprover_gotoc::GotocCtx;
-use crate::codegen_cprover_gotoc::worker::{WorkUnit, Workers};
+use crate::codegen_cprover_gotoc::file_writing_pool::{FileDataToWrite, ThreadPool};
 use crate::kani_middle::analysis;
 use crate::kani_middle::attributes::KaniAttributes;
 use crate::kani_middle::check_reachable_items;
@@ -52,6 +52,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tracing::{debug, info};
 
+const NUM_FILE_EXPORT_THREADS: usize = 2;
+
 pub type UnsupportedConstructs = FxHashMap<InternedString, Vec<Location>>;
 
 // #[derive(Clone)]
@@ -80,7 +82,7 @@ impl GotocCodegenBackend {
         machine_model: &MachineModel,
         check_contract: Option<InternalDefId>,
         mut transformer: BodyTransformation,
-        thread_pool: &Workers<NUM_THREADS>,
+        thread_pool: &ThreadPool<NUM_THREADS>,
     ) -> (GotocCtx<'tcx>, Vec<MonoItem>, Option<AssignsContract>) {
         // This runs reachability analysis before global passes are applied.
         //
@@ -205,7 +207,10 @@ impl GotocCodegenBackend {
         // No output should be generated if user selected no_codegen.
         if !tcx.sess.opts.unstable_opts.no_codegen && tcx.sess.opts.output_types.should_codegen() {
             let pretty = self.queries.lock().unwrap().args().output_pretty_json;
-            let new_unit = WorkUnit::new(
+
+            // Save all the data needed to write this goto file
+            // so another thread can handle it in parallel.
+            let new_file_data = FileDataToWrite::new(
                 symtab_goto,
                 &gcx.symbol_table,
                 vtable_restrictions,
@@ -213,9 +218,12 @@ impl GotocCodegenBackend {
                 pretty_name_map,
                 pretty,
             );
-            let with_interner = WithInterner::new_with_current(new_unit);
 
-            thread_pool.send_work(with_interner).unwrap();
+            // Package the file data with a copy of the string interner used to generate it.
+            let file_data_with_interner = WithInterner::new_with_current(new_file_data);
+
+            // Send everything to the thread pool for handling and move on.
+            thread_pool.send_work(file_data_with_interner).unwrap();
         }
 
         (gcx, items, contract_info)
@@ -341,7 +349,7 @@ impl CodegenBackend for GotocCodegenBackend {
                 return codegen_results(tcx, &results.machine_model);
             }
 
-            let worker_threads = Workers::new();
+            let export_thread_pool = ThreadPool::<NUM_FILE_EXPORT_THREADS>::new();
 
             match reachability {
                 ReachabilityType::AllFns | ReachabilityType::Harnesses => {
@@ -365,7 +373,7 @@ impl CodegenBackend for GotocCodegenBackend {
                                 &results.machine_model,
                                 contract_metadata,
                                 transformer,
-                                &worker_threads,
+                                &export_thread_pool,
                             );
                             if gcx.has_loop_contracts {
                                 loop_contracts_instances.push(*harness);
@@ -401,7 +409,7 @@ impl CodegenBackend for GotocCodegenBackend {
                         &results.machine_model,
                         Default::default(),
                         transformer,
-                        &worker_threads,
+                        &export_thread_pool,
                     );
                     assert!(contract_info.is_none());
                     let _ = results.extend(gcx, items, None);
@@ -409,7 +417,7 @@ impl CodegenBackend for GotocCodegenBackend {
             }
 
             // Worker threads should have only been initialized if we were doing codegen for this crate.
-            worker_threads.join_all();
+            export_thread_pool.join_all();
 
             if reachability != ReachabilityType::None {
                 // Print compilation report.

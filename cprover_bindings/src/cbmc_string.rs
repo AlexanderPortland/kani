@@ -35,6 +35,7 @@ impl !Send for InternedString {}
 /// A type that is only `!Send` because it contains types specific to a thread local [INTERNER] (e.g. [InternedString]s).
 /// This forces users to annotate that the types they want to wrap in [WithInterner] are `!Send` just for that specific reason rather than
 /// using it to make arbitrary types `Send`.
+///
 /// # Safety
 ///
 /// Should only be implemented for types which are `!Send` solely because they contain information specific
@@ -57,11 +58,6 @@ pub struct WithInterner<T> {
 }
 
 impl<T> WithInterner<T> {
-    /// Create a new wrapper with a given `interner` and `inner`.
-    pub fn new(interner: StringInterner<StringBackend>, inner: T) -> Self {
-        WithInterner { interner, inner }
-    }
-
     /// Create a new wrapper of `inner` with a clone of the current thread local [INTERNER].
     pub fn new_with_current(inner: T) -> Self {
         let interner = INTERNER.with_borrow(|i| i.clone());
