@@ -79,7 +79,7 @@
 //! object from the byte stream on the first occurrence.
 
 use crate::irep::{Irep, IrepId, Symbol, SymbolTable};
-use crate::{InternString, InternedString, cbmc_string};
+use crate::{InternString, InternedString};
 #[cfg(not(test))]
 use fxhash::FxHashMap;
 #[cfg(test)]

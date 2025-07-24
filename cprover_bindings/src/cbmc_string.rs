@@ -1,12 +1,10 @@
 // Copyright Kani Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 
-use lazy_static::lazy_static;
 use std::cell::RefCell;
-use std::sync::Mutex;
+use string_interner::StringInterner;
 use string_interner::backend::StringBackend;
 use string_interner::symbol::SymbolU32;
-use string_interner::{StringInterner, Symbol};
 
 /// This class implements an interner for Strings.
 /// CBMC objects to have a large number of strings which refer to names: symbols, files, etc.
@@ -24,58 +22,29 @@ use string_interner::{StringInterner, Symbol};
 #[derive(Clone, Hash, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct InternedString(SymbolU32);
 
-#[derive(Debug)]
-struct InternStats {
-    resolve_hits: usize,
-    resolve_miss: usize,
-    get_hits: usize,
-    get_miss: usize,
-}
-impl Default for InternStats {
-    fn default() -> Self {
-        InternStats { resolve_hits: 0, resolve_miss: 0, get_hits: 0, get_miss: 0 }
-    }
-}
-
-#[derive(Default)]
-struct InternerWrapper(StringInterner<StringBackend>, pub RefCell<InternStats>);
-
-impl InternerWrapper {
-    fn resolve_infalliable(&self, symbol: SymbolU32) -> &str {
-        self.0.resolve(symbol).expect("dont use this if it can fail")
-    }
-
-    fn get_or_intern<T: AsRef<str>>(&mut self, string: T) -> SymbolU32 {
-        if let Some(symbol) = self.0.get(&string) {
-            self.1.borrow_mut().get_hits += 1;
-            symbol
-        } else {
-            self.1.borrow_mut().get_miss += 1;
-            // println!("STATS NOW {:?} on interner of len {:?}", self.1, self.0.len());
-            self.0.get_or_intern(string)
-        }
-    }
-}
-
 // TODO: DONT use a `Mutex` to make this thread safe.
 thread_local! {
-    static INTERNER: RefCell<InternerWrapper> =
-        RefCell::new(InternerWrapper::default());
+    static INTERNER: RefCell<StringInterner<StringBackend>> =
+        RefCell::new(StringInterner::default());
 }
 
-/// [InternedString] is defined based on the thread local [INTERNER] and so cannot be safely
-/// sent between threads.
+/// The value of an [InternedString] is defined based on a thread local [INTERNER] so they cannot safely
+/// be sent between threads.
 impl !Send for InternedString {}
 
-/// A type that is only [!Send] because it contains [InternedString]s. This forces users to annotate that
-/// the types they want to wrap in [WithInterner] are `!Send` just for that specific reason rather than
+/// A type that is only `!Send` because it contains types specific to a thread local [INTERNER] (e.g. [InternedString]s).
+/// This forces users to annotate that the types they want to wrap in [WithInterner] are `!Send` just for that specific reason rather than
 /// using it to make arbitrary types `Send`.
-pub unsafe trait ContainsInternedString {}
+/// # Safety
+///
+/// Should only be implemented for types which are `!Send` solely because they contain information specific
+/// to their thread local [INTERNER].
+pub unsafe trait InternerSpecific {}
 
 /// Since [WithInterner<T>] guarantees that the inner `T` cannot be accessed without updating the
 /// thread local [INTERNER] to a copy of what was used to generate `T`, it is safe to send between threads,
 /// even if the inner `T` contains [InternedString]s which are not [Send] on their own.
-unsafe impl<T: ContainsInternedString> Send for WithInterner<T> {}
+unsafe impl<T: InternerSpecific> Send for WithInterner<T> {}
 
 /// A type [T] bundled with the [StringInterner] that was used to generate it.
 ///
@@ -95,14 +64,14 @@ impl<T> WithInterner<T> {
 
     /// Create a new wrapper of `inner` with a clone of the current thread local [INTERNER].
     pub fn new_with_current(inner: T) -> Self {
-        let interner = INTERNER.with_borrow(|i| i.0.clone());
+        let interner = INTERNER.with_borrow(|i| i.clone());
         WithInterner { interner, inner }
     }
 
     /// Get the inner wrapped `T` and implicitly update the current thread local [INTERNER] with a
     /// copy of the one used to generate `T`.
     pub fn into_inner(self) -> T {
-        INTERNER.with_borrow_mut(|i| i.0 = self.interner);
+        INTERNER.with_borrow_mut(|i| *i = self.interner);
         self.inner
     }
 }
@@ -120,7 +89,8 @@ impl InternedString {
     /// Needed because exporting the &str backing the InternedString is blocked by lifetime rules.
     /// Instead, this allows users to operate on the &str when needed.
     pub fn map<T, F: FnOnce(&str) -> T>(&self, f: F) -> T {
-        INTERNER.with_borrow(|i| f(i.resolve_infalliable(self.0)))
+        // TODO: how crazy is resolve_unchecked here??
+        INTERNER.with_borrow(|i| f(i.resolve(self.0).unwrap()))
     }
 
     pub fn starts_with(&self, pattern: &str) -> bool {
@@ -130,13 +100,13 @@ impl InternedString {
 
 impl std::fmt::Display for InternedString {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        INTERNER.with_borrow(|i| write!(fmt, "{}", i.resolve_infalliable(self.0)))
+        INTERNER.with_borrow(|i| write!(fmt, "{}", i.resolve(self.0).unwrap()))
     }
 }
 /// Custom-implement Debug, so our debug logging contains meaningful strings, not numbers
 impl std::fmt::Debug for InternedString {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        INTERNER.with_borrow(|i| write!(fmt, "{:?}", i.resolve_infalliable(self.0)))
+        INTERNER.with_borrow(|i| write!(fmt, "{:?}", i.resolve(self.0).unwrap()))
     }
 }
 
@@ -154,7 +124,7 @@ where
     T: AsRef<str>,
 {
     fn eq(&self, other: &T) -> bool {
-        INTERNER.with_borrow(|i| i.resolve_infalliable(self.0) == other.as_ref())
+        INTERNER.with_borrow(|i| i.resolve(self.0).unwrap() == other.as_ref())
     }
 }
 

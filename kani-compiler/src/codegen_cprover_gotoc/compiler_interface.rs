@@ -4,10 +4,10 @@
 //! This file contains the code necessary to interface with the compiler backend
 
 use crate::args::ReachabilityType;
+use crate::codegen_cprover_gotoc::GotocCtx;
 use crate::codegen_cprover_gotoc::worker::{
-    WORKERS, WorkUnit, deinitialize_workers, initialize_workers, send_work,
+    WorkUnit, deinitialize_workers, initialize_workers, send_work,
 };
-use crate::codegen_cprover_gotoc::{GotocCtx, worker};
 use crate::kani_middle::analysis;
 use crate::kani_middle::attributes::KaniAttributes;
 use crate::kani_middle::check_reachable_items;
@@ -17,7 +17,6 @@ use crate::kani_middle::reachability::{collect_reachable_items, filter_crate_ite
 use crate::kani_middle::transform::{BodyTransformation, GlobalPasses};
 use crate::kani_queries::QueryDb;
 use cbmc::goto_program::Location;
-use cbmc::irep::goto_binary_serde::write_goto_binary_file;
 use cbmc::{InternedString, MachineModel};
 use cbmc::{RoundingMode, WithInterner};
 use kani_metadata::artifact::convert_type;
@@ -46,16 +45,12 @@ use stable_mir::CrateDef;
 use stable_mir::mir::mono::{Instance, MonoItem};
 use stable_mir::rustc_internal;
 use std::any::Any;
-use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
-use std::sync::mpmc::Sender;
-use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
-use std::thread::JoinHandle;
 use std::time::Instant;
 use tracing::{debug, info};
 

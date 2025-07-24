@@ -1,14 +1,17 @@
+// Copyright Kani Contributors
+// SPDX-License-Identifier: Apache-2.0 OR MIT
+
 use lazy_static::lazy_static;
 use std::collections::BTreeMap;
 use std::convert::identity;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use std::sync::mpmc::{Receiver, Sender, channel};
-use std::sync::mpsc::{RecvError, SendError, TryRecvError};
+use std::sync::mpsc::{SendError, TryRecvError};
 use std::thread::JoinHandle;
 
 use cbmc::irep::goto_binary_serde::write_goto_binary_file;
-use cbmc::{ContainsInternedString, InternedString, WithInterner};
+use cbmc::{InternedString, InternerSpecific, WithInterner};
 use kani_metadata::ArtifactType;
 
 use crate::codegen_cprover_gotoc::compiler_interface::write_file;
@@ -22,7 +25,7 @@ pub(crate) struct WorkUnit {
     pub pretty: bool,
 }
 
-unsafe impl ContainsInternedString for WorkUnit {}
+unsafe impl InternerSpecific for WorkUnit {}
 
 impl WorkUnit {
     pub fn new(
@@ -47,7 +50,7 @@ impl WorkUnit {
 // could also be thread local
 const NUM_WORKERS: usize = 2;
 lazy_static! {
-    pub(crate) static ref WORKERS: Mutex<Option<Workers<NUM_WORKERS>>> = { Mutex::new(None) };
+    pub(crate) static ref WORKERS: Mutex<Option<Workers<NUM_WORKERS>>> = Mutex::new(None);
 }
 
 type WorkerReturn = ();
@@ -61,8 +64,10 @@ pub fn initialize_workers() {
     *WORKERS.lock().unwrap() = Some(Workers::new());
 }
 
-pub fn send_work(work: WithInterner<WorkUnit>) -> Result<(), SendError<WithInterner<WorkUnit>>> {
-    WORKERS.lock().unwrap().as_ref().unwrap().work_queue.send(work)
+type WorkToSend = WithInterner<WorkUnit>;
+pub fn send_work(work: WorkToSend) -> Result<(), Box<SendError<WorkToSend>>> {
+    // box the err output because it's large and this will safe us memory use in the much more common success case
+    WORKERS.lock().unwrap().as_ref().unwrap().work_queue.send(work).map_err(Box::new)
 }
 
 pub fn deinitialize_workers() -> Option<Workers<NUM_WORKERS>> {
@@ -84,7 +89,9 @@ impl<const N: usize> Workers<N> {
     }
 
     pub fn join_all(self) {
-        drop(self.work_queue); // this structure itself maintains a reference to teh work queue, we have to close it so workers will know to exit
+        // this structure itself maintains a reference to the work queue,
+        // we have to close it so the channel will close and workers will know to exit
+        drop(self.work_queue);
 
         for handle in self.join_handles {
             handle.join().unwrap();
@@ -96,17 +103,12 @@ fn worker_loop(work_queue: Receiver<WithInterner<WorkUnit>>) -> WorkerReturn {
     // println!("work loopin...");
     while let Ok(new_work) = work_queue.recv() {
         // this call to into_inner implicitly updates our thread local interner
-        println!("got work loopin...");
+        // println!("got work loopin...");
         handle_work(new_work.into_inner());
     }
 
-    // println!("shit closed");
-
-    if let Err(TryRecvError::Disconnected) = work_queue.try_recv() {
-        // println!("thread finished alright");
-    } else {
-        panic!("ahhhh");
-    }
+    // Double check that the work queue has been closed by the sender.
+    debug_assert!(matches!(work_queue.try_recv(), Err(TryRecvError::Disconnected)));
 }
 
 fn handle_work(
