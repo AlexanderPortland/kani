@@ -4,7 +4,7 @@
 //! This file contains the code necessary to interface with the compiler backend
 
 use crate::args::ReachabilityType;
-use crate::codegen_cprover_gotoc::worker::{WorkUnit, WORKERS};
+use crate::codegen_cprover_gotoc::worker::{deinitialize_workers, initialize_workers, send_work, WorkUnit, WORKERS};
 use crate::codegen_cprover_gotoc::{worker, GotocCtx};
 use crate::kani_middle::analysis;
 use crate::kani_middle::attributes::KaniAttributes;
@@ -212,14 +212,8 @@ impl GotocCodegenBackend {
             let with_interner = WithInterner::new_with_current(new_unit);
 
             // let (sender, reciever) = channel();
-            WORKERS.1.lock().as_ref().unwrap().as_ref().unwrap().send(with_interner).unwrap();
+            send_work(with_interner).unwrap();
             // println!("just sent work unit to queue (path {symtab_goto:?})... new len is {}", WORKERS.1.lock().as_ref().unwrap().as_ref().unwrap().len());
-
-            // std::thread::spawn(move ||{
-            //     let a = reciever;
-            // });
-            // write_files();
-            // self.file_writer_handles.borrow_mut().push(std::thread::spawn(write_files));
         }
 
         (gcx, items, contract_info)
@@ -339,6 +333,12 @@ impl CodegenBackend for GotocCodegenBackend {
             let base_filename = base_filepath.as_path();
             let reachability = queries.args().reachability_analysis;
             let mut results = GotoCodegenResults::new(tcx, reachability);
+            // initialize_workers();
+
+            if reachability != ReachabilityType::None {
+                initialize_workers();
+            }
+
             match reachability {
                 ReachabilityType::AllFns | ReachabilityType::Harnesses => {
                     let mut units = CodegenUnits::new(&queries, tcx);
@@ -375,7 +375,7 @@ impl CodegenBackend for GotocCodegenBackend {
                     units.store_loop_contracts(&loop_contracts_instances);
                     units.write_metadata(&queries, tcx);
                 }
-                ReachabilityType::None => {}
+                ReachabilityType::None => { println!("reachability type is none tho"); }
                 ReachabilityType::PubFns => {
                     let unit = CodegenUnit::default();
                     let transformer = BodyTransformation::new(&queries, tcx, &unit);
@@ -402,9 +402,10 @@ impl CodegenBackend for GotocCodegenBackend {
                 }
             }
 
-            let workers = WORKERS.0.lock().unwrap().take().expect("ownership of workers shouldn't be taken anywhere but here...");
-            let queue = WORKERS.1.lock().unwrap().take().expect("same here...");
-            workers.join_all(queue);
+            if reachability != ReachabilityType::None {
+                let workers = deinitialize_workers().expect("workers should only be deinitialized once");
+                workers.join_all();
+            }
 
             if reachability != ReachabilityType::None {
                 // Print compilation report.

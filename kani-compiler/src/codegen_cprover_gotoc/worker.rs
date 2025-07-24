@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::sync::mpsc::{RecvError, TryRecvError};
+use std::sync::mpsc::{RecvError, SendError, TryRecvError};
 use std::sync::Mutex;
 use lazy_static::lazy_static;
 use std::convert::identity;
@@ -36,18 +36,28 @@ impl WorkUnit {
 // could also be thread local
 const NUM_WORKERS: usize = 2;
 lazy_static! {
-    pub(crate) static ref WORKERS: (Mutex<Option<Workers<NUM_WORKERS>>>, Mutex<Option<Sender<WithInterner<WorkUnit>>>>) = {
-        let workers = Workers::new();
-        let sender = workers.work_queue.clone();
-        (Mutex::new(Some(workers)), Mutex::new(Some(sender)))
+    pub(crate) static ref WORKERS: Mutex<Option<Workers<NUM_WORKERS>>> = {
+        Mutex::new(None)
     };
 }
 
 type WorkerReturn = ();
 
 pub struct Workers<const N: usize> {
-    work_queue: Sender<WithInterner<WorkUnit>>,
+    pub(crate) work_queue: Sender<WithInterner<WorkUnit>>,
     join_handles: [JoinHandle<WorkerReturn>; N],
+}
+
+pub fn initialize_workers() {
+    *WORKERS.lock().unwrap() = Some(Workers::new());
+}
+
+pub fn send_work(work: WithInterner<WorkUnit>) -> Result<(), SendError<WithInterner<WorkUnit>>> {
+    WORKERS.lock().unwrap().as_ref().unwrap().work_queue.send(work)
+}
+
+pub fn deinitialize_workers() -> Option<Workers<NUM_WORKERS>> {
+    WORKERS.lock().unwrap().take()
 }
 
 impl<const N: usize> Workers<N> {
@@ -64,9 +74,9 @@ impl<const N: usize> Workers<N> {
         Workers { work_queue: work_queue_send, join_handles }
     }
 
-    pub fn join_all(self, queue_to_close: Sender<WithInterner<WorkUnit>>) {
-        drop(queue_to_close);
-        drop(self.work_queue);
+    pub fn join_all(self) {
+        drop(self.work_queue); // this structure itself maintains a reference to teh work queue, we have to close it so workers will know to exit
+        
         for handle in self.join_handles {
             handle.join().unwrap();
         }
