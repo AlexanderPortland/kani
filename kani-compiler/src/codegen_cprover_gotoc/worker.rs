@@ -1,14 +1,14 @@
-use std::collections::BTreeMap;
-use std::sync::mpsc::{RecvError, SendError, TryRecvError};
-use std::sync::Mutex;
 use lazy_static::lazy_static;
+use std::collections::BTreeMap;
 use std::convert::identity;
 use std::path::PathBuf;
-use std::sync::mpmc::{channel, Receiver, Sender};
+use std::sync::Mutex;
+use std::sync::mpmc::{Receiver, Sender, channel};
+use std::sync::mpsc::{RecvError, SendError, TryRecvError};
 use std::thread::JoinHandle;
 
 use cbmc::irep::goto_binary_serde::write_goto_binary_file;
-use cbmc::{InternedString, WithInterner};
+use cbmc::{ContainsInternedString, InternedString, WithInterner};
 use kani_metadata::ArtifactType;
 
 use crate::codegen_cprover_gotoc::compiler_interface::write_file;
@@ -22,23 +22,32 @@ pub(crate) struct WorkUnit {
     pub pretty: bool,
 }
 
+unsafe impl ContainsInternedString for WorkUnit {}
+
 impl WorkUnit {
-    pub fn new(symtab_goto: &std::path::Path,
-    symbol_table: &cbmc::goto_program::SymbolTable,
-    vtable_restrictions: Option<kani_metadata::VtableCtxResults>,
-    type_map: BTreeMap<InternedString, InternedString>,
-    pretty_name_map: BTreeMap<InternedString, Option<InternedString>>,
-    pretty: bool) -> Self {
-        WorkUnit { symtab_goto: symtab_goto.to_path_buf(), symbol_table: symbol_table.clone(), vtable_restrictions, type_map, pretty_name_map, pretty }
+    pub fn new(
+        symtab_goto: &std::path::Path,
+        symbol_table: &cbmc::goto_program::SymbolTable,
+        vtable_restrictions: Option<kani_metadata::VtableCtxResults>,
+        type_map: BTreeMap<InternedString, InternedString>,
+        pretty_name_map: BTreeMap<InternedString, Option<InternedString>>,
+        pretty: bool,
+    ) -> Self {
+        WorkUnit {
+            symtab_goto: symtab_goto.to_path_buf(),
+            symbol_table: symbol_table.clone(),
+            vtable_restrictions,
+            type_map,
+            pretty_name_map,
+            pretty,
+        }
     }
 }
 
 // could also be thread local
 const NUM_WORKERS: usize = 2;
 lazy_static! {
-    pub(crate) static ref WORKERS: Mutex<Option<Workers<NUM_WORKERS>>> = {
-        Mutex::new(None)
-    };
+    pub(crate) static ref WORKERS: Mutex<Option<Workers<NUM_WORKERS>>> = { Mutex::new(None) };
 }
 
 type WorkerReturn = ();
@@ -76,7 +85,7 @@ impl<const N: usize> Workers<N> {
 
     pub fn join_all(self) {
         drop(self.work_queue); // this structure itself maintains a reference to teh work queue, we have to close it so workers will know to exit
-        
+
         for handle in self.join_handles {
             handle.join().unwrap();
         }
@@ -100,7 +109,9 @@ fn worker_loop(work_queue: Receiver<WithInterner<WorkUnit>>) -> WorkerReturn {
     }
 }
 
-fn handle_work(WorkUnit { symtab_goto, symbol_table, vtable_restrictions, type_map, pretty_name_map, pretty }: WorkUnit) {
+fn handle_work(
+    WorkUnit { symtab_goto, symbol_table, vtable_restrictions, type_map, pretty_name_map, pretty }: WorkUnit,
+) {
     write_file(&symtab_goto, ArtifactType::PrettyNameMap, &pretty_name_map, pretty);
     write_goto_binary_file(&symtab_goto, &symbol_table);
     write_file(&symtab_goto, ArtifactType::TypeMap, &type_map, pretty);

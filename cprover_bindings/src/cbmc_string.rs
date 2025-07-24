@@ -4,9 +4,9 @@
 use lazy_static::lazy_static;
 use std::cell::RefCell;
 use std::sync::Mutex;
-use string_interner::{StringInterner, Symbol};
 use string_interner::backend::StringBackend;
 use string_interner::symbol::SymbolU32;
+use string_interner::{StringInterner, Symbol};
 
 /// This class implements an interner for Strings.
 /// CBMC objects to have a large number of strings which refer to names: symbols, files, etc.
@@ -67,15 +67,20 @@ thread_local! {
 /// sent between threads.
 impl !Send for InternedString {}
 
+/// A type that is only [!Send] because it contains [InternedString]s. This forces users to annotate that
+/// the types they want to wrap in [WithInterner] are `!Send` just for that specific reason rather than
+/// using it to make arbitrary types `Send`.
+pub unsafe trait ContainsInternedString {}
+
 /// Since [WithInterner<T>] guarantees that the inner `T` cannot be accessed without updating the
 /// thread local [INTERNER] to a copy of what was used to generate `T`, it is safe to send between threads,
 /// even if the inner `T` contains [InternedString]s which are not [Send] on their own.
-unsafe impl<T> Send for WithInterner<T> {}
+unsafe impl<T: ContainsInternedString> Send for WithInterner<T> {}
 
 /// A type [T] bundled with the [StringInterner] that was used to generate it.
-/// 
+///
 /// The only way to access the inner `T` is by calling `into_iter()`, which will automatically
-/// update the current thread's interner to the interner used the generate `T`, 
+/// update the current thread's interner to the interner used the generate `T`,
 /// ensuring interner coherence between the sending & receiving threads.
 pub struct WithInterner<T> {
     interner: StringInterner<StringBackend>,
@@ -97,7 +102,7 @@ impl<T> WithInterner<T> {
     /// Get the inner wrapped `T` and implicitly update the current thread local [INTERNER] with a
     /// copy of the one used to generate `T`.
     pub fn into_inner(self) -> T {
-        INTERNER.with_borrow_mut(|i| i.0 = self.interner );
+        INTERNER.with_borrow_mut(|i| i.0 = self.interner);
         self.inner
     }
 }
@@ -125,17 +130,13 @@ impl InternedString {
 
 impl std::fmt::Display for InternedString {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        INTERNER.with_borrow(|i|{
-            write!(fmt, "{}", i.resolve_infalliable(self.0))
-        })
+        INTERNER.with_borrow(|i| write!(fmt, "{}", i.resolve_infalliable(self.0)))
     }
 }
 /// Custom-implement Debug, so our debug logging contains meaningful strings, not numbers
 impl std::fmt::Debug for InternedString {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        INTERNER.with_borrow(|i|{
-            write!(fmt, "{:?}", i.resolve_infalliable(self.0))
-        })
+        INTERNER.with_borrow(|i| write!(fmt, "{:?}", i.resolve_infalliable(self.0)))
     }
 }
 
@@ -144,9 +145,7 @@ where
     T: AsRef<str>,
 {
     fn from(s: T) -> InternedString {
-        InternedString(INTERNER.with_borrow_mut(|i| {
-            i.get_or_intern(s)
-        }))
+        InternedString(INTERNER.with_borrow_mut(|i| i.get_or_intern(s)))
     }
 }
 
@@ -155,9 +154,7 @@ where
     T: AsRef<str>,
 {
     fn eq(&self, other: &T) -> bool {
-        INTERNER.with_borrow(|i|{
-            i.resolve_infalliable(self.0) == other.as_ref()
-        })
+        INTERNER.with_borrow(|i| i.resolve_infalliable(self.0) == other.as_ref())
     }
 }
 

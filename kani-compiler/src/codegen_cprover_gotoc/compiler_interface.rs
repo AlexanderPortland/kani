@@ -4,8 +4,10 @@
 //! This file contains the code necessary to interface with the compiler backend
 
 use crate::args::ReachabilityType;
-use crate::codegen_cprover_gotoc::worker::{deinitialize_workers, initialize_workers, send_work, WorkUnit, WORKERS};
-use crate::codegen_cprover_gotoc::{worker, GotocCtx};
+use crate::codegen_cprover_gotoc::worker::{
+    WORKERS, WorkUnit, deinitialize_workers, initialize_workers, send_work,
+};
+use crate::codegen_cprover_gotoc::{GotocCtx, worker};
 use crate::kani_middle::analysis;
 use crate::kani_middle::attributes::KaniAttributes;
 use crate::kani_middle::check_reachable_items;
@@ -14,10 +16,10 @@ use crate::kani_middle::provide;
 use crate::kani_middle::reachability::{collect_reachable_items, filter_crate_items};
 use crate::kani_middle::transform::{BodyTransformation, GlobalPasses};
 use crate::kani_queries::QueryDb;
-use cbmc::{RoundingMode, WithInterner};
 use cbmc::goto_program::Location;
 use cbmc::irep::goto_binary_serde::write_goto_binary_file;
 use cbmc::{InternedString, MachineModel};
+use cbmc::{RoundingMode, WithInterner};
 use kani_metadata::artifact::convert_type;
 use kani_metadata::{ArtifactType, HarnessMetadata, KaniMetadata, UnsupportedFeature};
 use kani_metadata::{AssignsContract, CompilerArtifactStub};
@@ -208,7 +210,14 @@ impl GotocCodegenBackend {
         // No output should be generated if user selected no_codegen.
         if !tcx.sess.opts.unstable_opts.no_codegen && tcx.sess.opts.output_types.should_codegen() {
             let pretty = self.queries.lock().unwrap().args().output_pretty_json;
-            let new_unit = WorkUnit::new(symtab_goto, &gcx.symbol_table, vtable_restrictions, type_map, pretty_name_map, pretty);
+            let new_unit = WorkUnit::new(
+                symtab_goto,
+                &gcx.symbol_table,
+                vtable_restrictions,
+                type_map,
+                pretty_name_map,
+                pretty,
+            );
             let with_interner = WithInterner::new_with_current(new_unit);
 
             // let (sender, reciever) = channel();
@@ -333,8 +342,8 @@ impl CodegenBackend for GotocCodegenBackend {
             let base_filename = base_filepath.as_path();
             let reachability = queries.args().reachability_analysis;
             let mut results = GotoCodegenResults::new(tcx, reachability);
-            // initialize_workers();
 
+            // Only initialize the worker threads if we will be doing codegen on this crate.
             if reachability != ReachabilityType::None {
                 initialize_workers();
             }
@@ -375,7 +384,7 @@ impl CodegenBackend for GotocCodegenBackend {
                     units.store_loop_contracts(&loop_contracts_instances);
                     units.write_metadata(&queries, tcx);
                 }
-                ReachabilityType::None => { println!("reachability type is none tho"); }
+                ReachabilityType::None => {}
                 ReachabilityType::PubFns => {
                     let unit = CodegenUnit::default();
                     let transformer = BodyTransformation::new(&queries, tcx, &unit);
@@ -402,8 +411,10 @@ impl CodegenBackend for GotocCodegenBackend {
                 }
             }
 
+            // Worker threads should have only been initialized if we were doing codegen for this crate.
             if reachability != ReachabilityType::None {
-                let workers = deinitialize_workers().expect("workers should only be deinitialized once");
+                let workers =
+                    deinitialize_workers().expect("workers should only be deinitialized once");
                 workers.join_all();
             }
 
