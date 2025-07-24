@@ -57,32 +57,45 @@ impl InternerWrapper {
     }
 }
 
-// Use a `Mutex` to make this thread safe.
+// TODO: DONT use a `Mutex` to make this thread safe.
 thread_local! {
     static INTERNER: RefCell<InternerWrapper> =
         RefCell::new(InternerWrapper::default());
 }
 
+/// [InternedString] is defined based on the thread local [INTERNER] and so cannot be safely
+/// sent between threads.
 impl !Send for InternedString {}
 
-// this isnt quite right but smth like this
+/// Since [WithInterner<T>] guarantees that the inner `T` cannot be accessed without updating the
+/// thread local [INTERNER] to a copy of what was used to generate `T`, it is safe to send between threads,
+/// even if the inner `T` contains [InternedString]s which are not [Send] on their own.
 unsafe impl<T> Send for WithInterner<T> {}
 
+/// A type [T] bundled with the [StringInterner] that was used to generate it.
+/// 
+/// The only way to access the inner `T` is by calling `into_iter()`, which will automatically
+/// update the current thread's interner to the interner used the generate `T`, 
+/// ensuring interner coherence between the sending & receiving threads.
 pub struct WithInterner<T> {
     interner: StringInterner<StringBackend>,
     inner: T,
 }
 
 impl<T> WithInterner<T> {
+    /// Create a new wrapper with a given `interner` and `inner`.
     pub fn new(interner: StringInterner<StringBackend>, inner: T) -> Self {
         WithInterner { interner, inner }
     }
 
+    /// Create a new wrapper of `inner` with a clone of the current thread local [INTERNER].
     pub fn new_with_current(inner: T) -> Self {
         let interner = INTERNER.with_borrow(|i| i.0.clone());
         WithInterner { interner, inner }
     }
 
+    /// Get the inner wrapped `T` and implicitly update the current thread local [INTERNER] with a
+    /// copy of the one used to generate `T`.
     pub fn into_inner(self) -> T {
         INTERNER.with_borrow_mut(|i| i.0 = self.interner );
         self.inner
@@ -90,29 +103,6 @@ impl<T> WithInterner<T> {
 }
 
 impl InternedString {
-    // No resets:
-    // STATS NOW RefCell { value: InternStats { resolve_hits: 0, resolve_miss: 0, get_hits: 33945043, get_miss: 58624 } } on interner of len 58623
-    // pub fn time_clone() {
-    //     INTERNER.with_borrow(|i|{
-    //         let start = std::time::Instant::now();
-    //         let b = std::hint::black_box(i.0.clone());
-    //         println!("took {:?} to clone interner", start.elapsed());
-    //     });
-    // }
-
-    // pub fn snapshot_interner() -> StringInterner<StringBackend> {
-    //     INTERNER.with_borrow(|i|i.0.clone())
-    // }
-
-    // pub fn override_interner(interner: StringInterner<StringBackend>) {
-    //     INTERNER.with_borrow_mut(|InternerWrapper(real, _)|{
-    //         let old_len = real.len();
-    //         let new_len = interner.len();
-    //         println!("overwrite from len {old_len} -> {new_len}");
-    //         *real = interner;
-    //     });
-    // }
-
     pub fn is_empty(&self) -> bool {
         self.map(|s| s.is_empty())
     }
