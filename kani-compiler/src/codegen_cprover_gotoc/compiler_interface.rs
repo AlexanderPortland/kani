@@ -4,7 +4,8 @@
 //! This file contains the code necessary to interface with the compiler backend
 
 use crate::args::ReachabilityType;
-use crate::codegen_cprover_gotoc::GotocCtx;
+use crate::codegen_cprover_gotoc::worker::{WorkUnit, WORKERS};
+use crate::codegen_cprover_gotoc::{worker, GotocCtx};
 use crate::kani_middle::analysis;
 use crate::kani_middle::attributes::KaniAttributes;
 use crate::kani_middle::check_reachable_items;
@@ -13,7 +14,7 @@ use crate::kani_middle::provide;
 use crate::kani_middle::reachability::{collect_reachable_items, filter_crate_items};
 use crate::kani_middle::transform::{BodyTransformation, GlobalPasses};
 use crate::kani_queries::QueryDb;
-use cbmc::RoundingMode;
+use cbmc::{RoundingMode, WithInterner};
 use cbmc::goto_program::Location;
 use cbmc::irep::goto_binary_serde::write_goto_binary_file;
 use cbmc::{InternedString, MachineModel};
@@ -49,6 +50,8 @@ use std::fmt::Write;
 use std::fs::File;
 use std::io::BufWriter;
 use std::path::Path;
+use std::sync::mpmc::Sender;
+use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Instant;
@@ -63,14 +66,11 @@ pub struct GotocCodegenBackend {
     /// Since we don't have any guarantees on when the compiler creates the Backend object, neither
     /// in which thread it will be used, we prefer to explicitly synchronize any query access.
     queries: Arc<Mutex<QueryDb>>,
-
-    file_writer_handles: RefCell<Vec<JoinHandle<()>>>,
 }
 
 impl GotocCodegenBackend {
     pub fn new(queries: Arc<Mutex<QueryDb>>) -> Self {
-        let file_writer_handles = RefCell::new(Vec::new());
-        GotocCodegenBackend { queries, file_writer_handles }
+        GotocCodegenBackend { queries }
     }
 
     /// Generate code that is reachable from the given starting points.
@@ -208,23 +208,17 @@ impl GotocCodegenBackend {
         // No output should be generated if user selected no_codegen.
         if !tcx.sess.opts.unstable_opts.no_codegen && tcx.sess.opts.output_types.should_codegen() {
             let pretty = self.queries.lock().unwrap().args().output_pretty_json;
-            let write_files = {
-                let now = std::time::Instant::now();
-                let symtab_goto = symtab_goto.to_owned();
-                let symbol_table_ref = gcx.symbol_table.clone();
-                println!("cloning symbol table took {:?}", now.elapsed());
-                // panic!();
-                move || {
-                    write_file(&symtab_goto, ArtifactType::PrettyNameMap, &pretty_name_map, pretty);
-                    write_goto_binary_file(&symtab_goto, &symbol_table_ref);
-                    write_file(&symtab_goto, ArtifactType::TypeMap, &type_map, pretty);
-                    // If they exist, write out vtable virtual call function pointer restrictions
-                    if let Some(restrictions) = vtable_restrictions {
-                        write_file(&symtab_goto, ArtifactType::VTableRestriction, &restrictions, pretty);
-                    }
-                }
-            };
-            write_files();
+            let new_unit = WorkUnit::new(symtab_goto, &gcx.symbol_table, vtable_restrictions, type_map, pretty_name_map, pretty);
+            let with_interner = WithInterner::new_with_current(new_unit);
+
+            // let (sender, reciever) = channel();
+            WORKERS.1.lock().as_ref().unwrap().as_ref().unwrap().send(with_interner).unwrap();
+            // println!("just sent work unit to queue (path {symtab_goto:?})... new len is {}", WORKERS.1.lock().as_ref().unwrap().as_ref().unwrap().len());
+
+            // std::thread::spawn(move ||{
+            //     let a = reciever;
+            // });
+            // write_files();
             // self.file_writer_handles.borrow_mut().push(std::thread::spawn(write_files));
         }
 
@@ -408,9 +402,9 @@ impl CodegenBackend for GotocCodegenBackend {
                 }
             }
 
-            for handle in self.file_writer_handles.take() {
-                handle.join().unwrap();
-            }
+            let workers = WORKERS.0.lock().unwrap().take().expect("ownership of workers shouldn't be taken anywhere but here...");
+            let queue = WORKERS.1.lock().unwrap().take().expect("same here...");
+            workers.join_all(queue);
 
             if reachability != ReachabilityType::None {
                 // Print compilation report.

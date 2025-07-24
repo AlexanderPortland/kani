@@ -58,34 +58,60 @@ impl InternerWrapper {
 }
 
 // Use a `Mutex` to make this thread safe.
-lazy_static! {
-    static ref INTERNER: Mutex<InternerWrapper> =
-        Mutex::new(InternerWrapper::default());
+thread_local! {
+    static INTERNER: RefCell<InternerWrapper> =
+        RefCell::new(InternerWrapper::default());
+}
+
+impl !Send for InternedString {}
+
+// this isnt quite right but smth like this
+unsafe impl<T> Send for WithInterner<T> {}
+
+pub struct WithInterner<T> {
+    interner: StringInterner<StringBackend>,
+    inner: T,
+}
+
+impl<T> WithInterner<T> {
+    pub fn new(interner: StringInterner<StringBackend>, inner: T) -> Self {
+        WithInterner { interner, inner }
+    }
+
+    pub fn new_with_current(inner: T) -> Self {
+        let interner = INTERNER.with_borrow(|i| i.0.clone());
+        WithInterner { interner, inner }
+    }
+
+    pub fn into_inner(self) -> T {
+        INTERNER.with_borrow_mut(|i| i.0 = self.interner );
+        self.inner
+    }
 }
 
 impl InternedString {
     // No resets:
     // STATS NOW RefCell { value: InternStats { resolve_hits: 0, resolve_miss: 0, get_hits: 33945043, get_miss: 58624 } } on interner of len 58623
-    pub fn time_clone() {
-        let a = &mut INTERNER.lock().unwrap().0;
-        let start = std::time::Instant::now();
-        let b = std::hint::black_box(a.clone());
-        println!("took {:?} to clone interner", start.elapsed());
+    // pub fn time_clone() {
+    //     INTERNER.with_borrow(|i|{
+    //         let start = std::time::Instant::now();
+    //         let b = std::hint::black_box(i.0.clone());
+    //         println!("took {:?} to clone interner", start.elapsed());
+    //     });
+    // }
 
-        // INTERNER.lock().unwrap().0 = StringInterner::default();
-    }
+    // pub fn snapshot_interner() -> StringInterner<StringBackend> {
+    //     INTERNER.with_borrow(|i|i.0.clone())
+    // }
 
-    pub fn snapshot_interner() -> StringInterner<StringBackend> {
-        INTERNER.lock().unwrap().0.clone()
-    }
-
-    pub fn override_interner(interner: StringInterner<StringBackend>) {
-        let real = &mut INTERNER.lock().unwrap().0;
-        let old_len = real.len();
-        let new_len = interner.len();
-        println!("overwrite from len {old_len} -> {new_len}");
-        *real = interner;
-    }
+    // pub fn override_interner(interner: StringInterner<StringBackend>) {
+    //     INTERNER.with_borrow_mut(|InternerWrapper(real, _)|{
+    //         let old_len = real.len();
+    //         let new_len = interner.len();
+    //         println!("overwrite from len {old_len} -> {new_len}");
+    //         *real = interner;
+    //     });
+    // }
 
     pub fn is_empty(&self) -> bool {
         self.map(|s| s.is_empty())
@@ -99,7 +125,7 @@ impl InternedString {
     /// Needed because exporting the &str backing the InternedString is blocked by lifetime rules.
     /// Instead, this allows users to operate on the &str when needed.
     pub fn map<T, F: FnOnce(&str) -> T>(&self, f: F) -> T {
-        f(INTERNER.lock().unwrap().resolve_infalliable(self.0))
+        INTERNER.with_borrow(|i| f(i.resolve_infalliable(self.0)))
     }
 
     pub fn starts_with(&self, pattern: &str) -> bool {
@@ -109,13 +135,17 @@ impl InternedString {
 
 impl std::fmt::Display for InternedString {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(fmt, "{}", INTERNER.lock().unwrap().resolve_infalliable(self.0))
+        INTERNER.with_borrow(|i|{
+            write!(fmt, "{}", i.resolve_infalliable(self.0))
+        })
     }
 }
 /// Custom-implement Debug, so our debug logging contains meaningful strings, not numbers
 impl std::fmt::Debug for InternedString {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(fmt, "{:?}", INTERNER.lock().unwrap().resolve_infalliable(self.0))
+        INTERNER.with_borrow(|i|{
+            write!(fmt, "{:?}", i.resolve_infalliable(self.0))
+        })
     }
 }
 
@@ -124,7 +154,9 @@ where
     T: AsRef<str>,
 {
     fn from(s: T) -> InternedString {
-        InternedString(INTERNER.lock().unwrap().get_or_intern(s))
+        InternedString(INTERNER.with_borrow_mut(|i| {
+            i.get_or_intern(s)
+        }))
     }
 }
 
@@ -133,7 +165,9 @@ where
     T: AsRef<str>,
 {
     fn eq(&self, other: &T) -> bool {
-        INTERNER.lock().unwrap().resolve_infalliable(self.0) == other.as_ref()
+        INTERNER.with_borrow(|i|{
+            i.resolve_infalliable(self.0) == other.as_ref()
+        })
     }
 }
 

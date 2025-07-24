@@ -5,6 +5,7 @@ mod compiler_interface;
 mod context;
 mod overrides;
 mod utils;
+pub(crate) mod worker;
 
 pub use compiler_interface::{GotocCodegenBackend, UnsupportedConstructs};
 pub use context::GotocCtx;
