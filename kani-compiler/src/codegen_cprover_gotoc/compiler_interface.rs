@@ -317,6 +317,10 @@ impl CodegenBackend for GotocCodegenBackend {
                 }
             }
 
+            let crate_name = tcx.crate_name(LOCAL_CRATE);
+            println!("[*] starting our codegen of {crate_name}");
+            let start = std::time::Instant::now();
+
             // Codegen all items that need to be processed according to the selected reachability mode:
             //
             // - Harnesses: Generate one model per local harnesses (marked with `kani::proof` attribute).
@@ -409,7 +413,9 @@ impl CodegenBackend for GotocCodegenBackend {
                     );
                 }
             }
-            codegen_results(tcx, &results.machine_model)
+            let res = codegen_results(tcx, &results.machine_model);
+            println!("\t[!] finished codegen of {crate_name} in {:?}", start.elapsed());
+            res
         });
         ret_val.unwrap()
     }

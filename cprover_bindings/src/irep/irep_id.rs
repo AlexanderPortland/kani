@@ -1720,6 +1720,7 @@ impl Display for IrepId {
             IrepId::VectorGt => "vector->",
             IrepId::VectorLt => "vector-<",
             IrepId::FloatbvRoundToIntegral => "floatbv_round_to_integral",
+            IrepId::ShuffleVector => "shuffle_vector",
         };
         write!(f, "{s}")
     }
