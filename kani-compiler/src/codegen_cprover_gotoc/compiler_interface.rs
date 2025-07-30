@@ -395,12 +395,19 @@ impl CodegenBackend for GotocCodegenBackend {
                     for unit in units.iter() {
                         // We reset the body cache for now because each codegen unit has different
                         // configurations that affect how we transform the instance body.
-                        for harness in &unit.harnesses {
+                        for harness in unit.ordered_harnesses() {
+                            let harness_start = std::time::Instant::now();
                             let transformer = BodyTransformation::new(&queries, tcx, unit);
                             let model_path = units.harness_model_path(*harness).unwrap();
                             let is_automatic_harness = units.is_automatic_harness(harness);
                             let contract_metadata =
                                 self.target_def_id_for_harness(tcx, harness, is_automatic_harness);
+
+                            println!(
+                                "\t[!] harness {:?} -- heuristic is {:?}",
+                                harness.trimmed_name(),
+                                CodegenUnit::ordering_heuristic(&harness)
+                            );
                             let (min_gcx, items, contract_info) = self.codegen_items(
                                 tcx,
                                 &[MonoItem::Fn(*harness)],
@@ -417,6 +424,11 @@ impl CodegenBackend for GotocCodegenBackend {
                             if let Some(assigns_contract) = contract_info {
                                 modifies_instances.push((*harness, assigns_contract));
                             }
+                            println!(
+                                "working on harness {:?} took {:?}",
+                                harness.trimmed_name(),
+                                harness_start.elapsed()
+                            );
                         }
                     }
                     units.store_modifies(&modifies_instances);

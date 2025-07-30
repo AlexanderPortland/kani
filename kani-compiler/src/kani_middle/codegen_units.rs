@@ -19,6 +19,7 @@ use crate::kani_middle::stubbing::{check_compatibility, harness_stub_map};
 use crate::kani_middle::{can_derive_arbitrary, implements_arbitrary};
 use crate::kani_queries::QueryDb;
 use fxhash::{FxHashMap, FxHashSet};
+use itertools::Itertools;
 use kani_metadata::{
     ArtifactType, AssignsContract, AutoHarnessMetadata, AutoHarnessSkipReason, HarnessKind,
     HarnessMetadata, KaniMetadata, find_proof_harnesses,
@@ -65,6 +66,42 @@ pub struct CodegenUnits {
 pub struct CodegenUnit {
     pub harnesses: Vec<Harness>,
     pub stubs: Stubs,
+}
+
+pub struct LenRecordingWriter(usize);
+
+impl LenRecordingWriter {
+    pub fn new() -> Self {
+        LenRecordingWriter(0)
+    }
+
+    pub fn take(self) -> usize {
+        self.0
+    }
+}
+
+impl std::io::Write for LenRecordingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0 += buf.len();
+        std::io::Result::Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        std::io::Result::Ok(())
+    }
+}
+
+impl CodegenUnit {
+    pub fn ordering_heuristic(harness: &&Harness) -> usize {
+        let mut writer = LenRecordingWriter::new();
+        harness.emit_mir(&mut writer).map_or(0, |_| writer.take())
+    }
+
+    /// Returns an iterator over this codegen unit's harnesses, sorted by the ordering heuristic.
+    /// Higher values of the heuristic will come first.
+    pub fn ordered_harnesses(&self) -> impl Iterator<Item = &Harness> {
+        self.harnesses.iter().sorted_by_cached_key(Self::ordering_heuristic).rev()
+    }
 }
 
 impl CodegenUnits {
