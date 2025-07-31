@@ -40,10 +40,20 @@ use std::{
     io::{BufWriter, Write},
 };
 
+use crate::codegen_cprover_gotoc::ReachabilityInfo;
 use crate::kani_middle::coercion;
 use crate::kani_middle::coercion::CoercionBase;
 use crate::kani_middle::is_anon_static;
 use crate::kani_middle::transform::BodyTransformation;
+
+pub fn generate_reachability_info(
+    tcx: TyCtxt,
+    transformer: &mut BodyTransformation,
+    starting_items: Vec<MonoItem>,
+) -> ReachabilityInfo {
+    let (reachable_items, call_graph) = collect_reachable_items(tcx, transformer, &starting_items);
+    ReachabilityInfo { starting_items, reachable_items, call_graph }
+}
 
 /// Collect all reachable items starting from the given starting points.
 pub fn collect_reachable_items(

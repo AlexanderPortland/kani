@@ -15,7 +15,9 @@ use crate::kani_middle::codegen_order::{
 };
 use crate::kani_middle::codegen_units::{CodegenUnit, CodegenUnits, Harness};
 use crate::kani_middle::provide;
-use crate::kani_middle::reachability::{CallGraph, collect_reachable_items, filter_crate_items};
+use crate::kani_middle::reachability::{
+    CallGraph, collect_reachable_items, filter_crate_items, generate_reachability_info,
+};
 use crate::kani_middle::transform::{BodyTransformation, GlobalPasses};
 use crate::kani_queries::QueryDb;
 use cbmc::goto_program::Location;
@@ -68,8 +70,8 @@ const MAX_SENSIBLE_FILE_EXPORT_THREADS: usize = 4;
 
 pub type UnsupportedConstructs = FxHashMap<InternedString, Vec<Location>>;
 
-pub struct ReachabilityInfo<'a> {
-    pub starting_items: &'a [MonoItem],
+pub struct ReachabilityInfo {
+    pub starting_items: Vec<MonoItem>,
     pub reachable_items: Vec<MonoItem>,
     pub call_graph: CallGraph,
 }
@@ -94,7 +96,7 @@ impl GotocCodegenBackend {
     fn codegen_items<'tcx>(
         &self,
         tcx: TyCtxt<'tcx>,
-        mut reachability_info: ReachabilityInfo<'_>,
+        mut reachability_info: ReachabilityInfo,
         symtab_goto: &Path,
         machine_model: &MachineModel,
         check_contract: Option<InternalDefId>,
@@ -128,7 +130,7 @@ impl GotocCodegenBackend {
         let any_pass_modified = global_passes.run_global_passes(
             &mut transformer,
             tcx,
-            reachability_info.starting_items,
+            &reachability_info.starting_items,
             instances,
             reachability_info.call_graph,
         );
@@ -137,7 +139,13 @@ impl GotocCodegenBackend {
         // since global pass could add extra calls to instrumentation.
         if any_pass_modified {
             (reachability_info.reachable_items, _) = with_timer(
-                || collect_reachable_items(tcx, &mut transformer, reachability_info.starting_items),
+                || {
+                    collect_reachable_items(
+                        tcx,
+                        &mut transformer,
+                        &reachability_info.starting_items,
+                    )
+                },
                 "codegen reachability analysis (second pass)",
             );
         }
@@ -295,16 +303,16 @@ fn reachability_analysis_fn_for_harness<'a>(
     move |harness: &'a Harness| {
         let mut transformer = BodyTransformation::new(queries, tcx, unit);
 
-        let (items, call_graph) = with_timer(
-            || collect_reachable_items(tcx, &mut transformer, &[MonoItem::Fn(*harness)]),
+        let info = with_timer(
+            || generate_reachability_info(tcx, &mut transformer, vec![MonoItem::Fn(*harness)]),
             "codegen reachability analysis",
         );
 
-        ((harness, items, call_graph), transformer)
+        ((harness, info), transformer)
     }
 }
 
-pub type HarnessWithReachable<'a> = (&'a Harness, Vec<MonoItem>, CallGraph);
+pub type HarnessWithReachable<'a> = (&'a Harness, ReachabilityInfo);
 
 impl CodegenBackend for GotocCodegenBackend {
     fn provide(&self, providers: &mut Providers) {
@@ -430,23 +438,19 @@ impl CodegenBackend for GotocCodegenBackend {
                         .apply_ordering_heuristic::<MostReachableItems>()
                         .flatten();
 
-                    for ((harness, reachable_items, call_graph), transformer) in ordered_harnesses {
+                    for ((harness, reachability), transformer) in ordered_harnesses {
                         let harness_start = std::time::Instant::now();
                         let model_path = units.harness_model_path(*harness).unwrap();
                         let is_automatic_harness = units.is_automatic_harness(harness);
                         let contract_metadata =
                             self.target_def_id_for_harness(tcx, harness, is_automatic_harness);
 
-                        let (harness, reachable_items, call_graph) =
-                            print_harness_heuristic((harness, reachable_items, call_graph));
+                        let (harness, reachability) =
+                            print_harness_heuristic((harness, reachability));
 
                         let (min_gcx, items, contract_info) = self.codegen_items(
                             tcx,
-                            ReachabilityInfo {
-                                starting_items: &[MonoItem::Fn(*harness)],
-                                reachable_items,
-                                call_graph,
-                            },
+                            reachability,
                             model_path,
                             &results.machine_model,
                             contract_metadata,
@@ -489,17 +493,13 @@ impl CodegenBackend for GotocCodegenBackend {
                     .map(MonoItem::Fn)
                     .collect::<Vec<_>>();
 
-                    let (reachable_items, call_graph) =
-                        collect_reachable_items(tcx, &mut transformer, &local_reachable);
+                    let reachability_info =
+                        generate_reachability_info(tcx, &mut transformer, local_reachable);
 
                     let model_path = base_filename.with_extension(ArtifactType::SymTabGoto);
                     let (gcx, items, contract_info) = self.codegen_items(
                         tcx,
-                        ReachabilityInfo {
-                            starting_items: &local_reachable,
-                            reachable_items,
-                            call_graph,
-                        },
+                        reachability_info,
                         &model_path,
                         &results.machine_model,
                         Default::default(),

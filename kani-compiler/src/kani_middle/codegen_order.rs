@@ -9,7 +9,7 @@ pub struct MostReachableItems;
 
 impl CodegenHeuristic for MostReachableItems {
     fn evaluate_harness(harness: &HarnessWithReachable) -> usize {
-        harness.1.len()
+        harness.1.reachable_items.len()
     }
 }
 
