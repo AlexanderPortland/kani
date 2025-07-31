@@ -21,6 +21,7 @@ use crate::kani_middle::reachability::CallGraph;
 use crate::kani_middle::transform::body::CheckType;
 use crate::kani_middle::transform::check_uninit::{DelayedUbPass, UninitPass};
 use crate::kani_middle::transform::check_values::ValidValuePass;
+use crate::kani_middle::transform::clone::ClonableTransformPass;
 use crate::kani_middle::transform::contracts::{AnyModifiesPass, FunctionWithContractPass};
 use crate::kani_middle::transform::kani_intrinsics::IntrinsicGeneratorPass;
 use crate::kani_middle::transform::loop_contracts::LoopContractPass;
@@ -58,9 +59,9 @@ mod stubs;
 pub struct BodyTransformation {
     /// The passes that may change the function body according to harness configuration.
     /// The stubbing passes should be applied before so user stubs take precedence.
-    stub_passes: Vec<Box<dyn TransformPass>>,
+    stub_passes: Vec<Box<dyn ClonableTransformPass>>,
     /// The passes that may add safety checks to the function body.
-    inst_passes: Vec<Box<dyn TransformPass>>,
+    inst_passes: Vec<Box<dyn ClonableTransformPass>>,
     /// Cache transformation results.
     cache: HashMap<Instance, TransformationResult>,
 }
@@ -86,7 +87,7 @@ impl BodyTransformation {
         transformer.add_pass(
             queries,
             ValidValuePass {
-                safety_check_type: safety_check_type.clone(),
+                safety_check_type,
                 unsupported_check_type: unsupported_check_type.clone(),
             },
         );
@@ -139,7 +140,7 @@ impl BodyTransformation {
         }
     }
 
-    fn add_pass<P: TransformPass + 'static>(&mut self, query_db: &QueryDb, pass: P) {
+    fn add_pass<P: ClonableTransformPass + 'static>(&mut self, query_db: &QueryDb, pass: P) {
         if pass.is_enabled(query_db) {
             match P::transformation_type() {
                 TransformationType::Instrumentation => self.inst_passes.push(Box::new(pass)),
@@ -171,6 +172,54 @@ pub(crate) trait TransformPass: Debug {
 
     /// Run a transformation pass in the function body.
     fn transform(&mut self, tcx: TyCtxt, body: Body, instance: Instance) -> (bool, Body);
+}
+
+mod clone {
+    //! This is all fancy machinery to implement `Clone` for a `Box<dyn TransformPass + Clone>`.
+    //! For the curious reader, see the notes below:
+    //!
+    //! Rust won't let you have dyn of multiple traits, and if you were to
+    //!    A) make a T: TransformPass + Clone, it wouldn't be compatible w/ dyn because you
+    //!    couldn't construct a vtable for it (how do you know how much space cloning a
+    //!    `dyn Clone` would take up?).
+    //! You could try to
+    //!    B) make a trait CloneIntoTransformPass that allows you to clone into a Box<dyn TransformPass>, but
+    //!    you'd actually want it to clone into Box<dyn CloneIntoTransformPass> or else you couldn't clone multiple times.
+    //!    But how would you implement such a trait? If you were to implement that for `T`, you'd have to know in advance that
+    //!    `T` implements CloneIntoTransformPass which is the trait you're currently trying to implement!
+    //!
+    //! To avoid this circular reasoning, we use two traits that can each clone into a dyn of the other, and since
+    //! we set both up to have blanket implementations for all `T: TransformPass + Clone`, the compiler pieces them together properly!
+
+    use std::fmt::Debug;
+
+    use crate::kani_middle::transform::TransformPass;
+
+    impl Clone for Box<dyn ClonableTransformPass> {
+        fn clone(&self) -> Self {
+            self.clone_there().clone_back()
+        }
+    }
+
+    pub(crate) trait ClonableTransformPass: Debug + TransformPass {
+        fn clone_there(&self) -> Box<dyn CloneBackIntoPass>;
+    }
+
+    impl<T: TransformPass + Clone + 'static> ClonableTransformPass for T {
+        fn clone_there(&self) -> Box<dyn CloneBackIntoPass> {
+            Box::new(self.clone())
+        }
+    }
+
+    pub(crate) trait CloneBackIntoPass {
+        fn clone_back(&self) -> Box<dyn ClonableTransformPass>;
+    }
+
+    impl<T: TransformPass + Clone + 'static> CloneBackIntoPass for T {
+        fn clone_back(&self) -> Box<dyn ClonableTransformPass> {
+            Box::new(self.clone())
+        }
+    }
 }
 
 /// A trait to represent transformation passes that operate on the whole codegen unit.
