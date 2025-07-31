@@ -10,9 +10,9 @@ use crate::codegen_cprover_gotoc::{GotocCtx, context};
 use crate::kani_middle::analysis;
 use crate::kani_middle::attributes::KaniAttributes;
 use crate::kani_middle::check_reachable_items;
-use crate::kani_middle::codegen_units::{CodegenUnit, CodegenUnits};
+use crate::kani_middle::codegen_units::{CodegenUnit, CodegenUnits, Harness};
 use crate::kani_middle::provide;
-use crate::kani_middle::reachability::{collect_reachable_items, filter_crate_items};
+use crate::kani_middle::reachability::{collect_reachable_items, filter_crate_items, CallGraph};
 use crate::kani_middle::transform::{BodyTransformation, GlobalPasses};
 use crate::kani_queries::QueryDb;
 use cbmc::goto_program::Location;
@@ -86,6 +86,8 @@ impl GotocCodegenBackend {
         &self,
         tcx: TyCtxt<'tcx>,
         starting_items: &[MonoItem],
+        mut reachable_items: Vec<MonoItem>,
+        call_graph: CallGraph,
         symtab_goto: &Path,
         machine_model: &MachineModel,
         check_contract: Option<InternalDefId>,
@@ -99,13 +101,10 @@ impl GotocCodegenBackend {
         // disadvantage of not having a precomputed call graph for the global passes to use. The
         // call graph could be used, for example, in resolving function pointer or vtable calls for
         // global passes that need this.
-        let (mut items, call_graph) = with_timer(
-            || collect_reachable_items(tcx, &mut transformer, starting_items),
-            "codegen reachability analysis",
-        );
+        // let (_, mut items, call_graph) = reachability;
 
         // Retrieve all instances from the currently codegened items.
-        let instances = items
+        let instances = reachable_items
             .iter()
             .filter_map(|item| match item {
                 MonoItem::Fn(instance) => Some(*instance),
@@ -130,7 +129,7 @@ impl GotocCodegenBackend {
         // Re-collect reachable items after global transformations were applied. This is necessary
         // since global pass could add extra calls to instrumentation.
         if any_pass_modified {
-            (items, _) = with_timer(
+            (reachable_items, _) = with_timer(
                 || collect_reachable_items(tcx, &mut transformer, starting_items),
                 "codegen reachability analysis (second pass)",
             );
@@ -140,12 +139,12 @@ impl GotocCodegenBackend {
         // https://rustc-dev-guide.rust-lang.org/conventions.html#naming-conventions
         let mut gcx =
             GotocCtx::new(tcx, (*self.queries.lock().unwrap()).clone(), machine_model, transformer);
-        check_reachable_items(gcx.tcx, &gcx.queries, &items);
+        check_reachable_items(gcx.tcx, &gcx.queries, &reachable_items);
 
         let contract_info = with_timer(
             || {
                 // we first declare all items
-                for item in &items {
+                for item in &reachable_items {
                     match *item {
                         MonoItem::Fn(instance) => {
                             gcx.call_with_panic_debug_info(
@@ -166,7 +165,7 @@ impl GotocCodegenBackend {
                 }
 
                 // then we move on to codegen
-                for item in &items {
+                for item in &reachable_items {
                     match *item {
                         MonoItem::Fn(instance) => {
                             gcx.call_with_panic_debug_info(
@@ -190,7 +189,7 @@ impl GotocCodegenBackend {
                     }
                 }
 
-                check_contract.map(|check_id| gcx.handle_check_contract(check_id, &items))
+                check_contract.map(|check_id| gcx.handle_check_contract(check_id, &reachable_items))
             },
             "codegen",
         );
@@ -238,7 +237,7 @@ impl GotocCodegenBackend {
             thread_pool.send_work(file_data_with_interner).unwrap();
         }
 
-        (min_gcx, items, contract_info)
+        (min_gcx, reachable_items, contract_info)
     }
 
     /// Determines the number of threads to add to the pool for goto binary exporting.
@@ -278,6 +277,8 @@ impl GotocCodegenBackend {
         }
     }
 }
+
+type HarnessWithReachable<'a> = (&'a Harness, Vec<MonoItem>, CallGraph);
 
 impl CodegenBackend for GotocCodegenBackend {
     fn provide(&self, providers: &mut Providers) {
@@ -392,12 +393,22 @@ impl CodegenBackend for GotocCodegenBackend {
                     export_thread_pool.add_workers(Self::thread_pool_size(Some(num_harnesses)));
 
                     // Cross-crate collecting of all items that are reachable from the crate harnesses.
-                    for unit in units.iter() {
-                        // We reset the body cache for now because each codegen unit has different
-                        // configurations that affect how we transform the instance body.
-                        for harness in unit.ordered_harnesses() {
+                    
+                    let a = units.iter().map::<Vec<(HarnessWithReachable, BodyTransformation)>, _>(|unit| {
+                        unit.harnesses.iter().map(|harness|{
+                            let mut transformer = BodyTransformation::new(&queries, tcx, unit);
+
+                            let (items, call_graph) = with_timer(
+                                || collect_reachable_items(tcx, &mut transformer, &[MonoItem::Fn(*harness)]),
+                                "codegen reachability analysis",
+                            );
+
+                            ((harness, items, call_graph), transformer)
+                        }).collect::<Vec<_>>()
+                    });
+                    a.for_each(|harnesses|{
+                        for ((harness, items, call_graph), transformer) in harnesses {
                             let harness_start = std::time::Instant::now();
-                            let transformer = BodyTransformation::new(&queries, tcx, unit);
                             let model_path = units.harness_model_path(*harness).unwrap();
                             let is_automatic_harness = units.is_automatic_harness(harness);
                             let contract_metadata =
@@ -408,9 +419,12 @@ impl CodegenBackend for GotocCodegenBackend {
                                 harness.trimmed_name(),
                                 CodegenUnit::ordering_heuristic(&harness)
                             );
+
                             let (min_gcx, items, contract_info) = self.codegen_items(
                                 tcx,
                                 &[MonoItem::Fn(*harness)],
+                                items,
+                                call_graph,
                                 model_path,
                                 &results.machine_model,
                                 contract_metadata,
@@ -430,7 +444,8 @@ impl CodegenBackend for GotocCodegenBackend {
                                 harness_start.elapsed()
                             );
                         }
-                    }
+                    });
+                    
                     units.store_modifies(&modifies_instances);
                     units.store_loop_contracts(&loop_contracts_instances);
                     units.write_metadata(&queries, tcx);
@@ -456,6 +471,8 @@ impl CodegenBackend for GotocCodegenBackend {
                     let (gcx, items, contract_info) = self.codegen_items(
                         tcx,
                         &local_reachable,
+                        todo!(),
+                        todo!(),
                         &model_path,
                         &results.machine_model,
                         Default::default(),
