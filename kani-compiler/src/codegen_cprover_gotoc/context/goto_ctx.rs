@@ -41,7 +41,7 @@ use rustc_public::ty::Allocation;
 use rustc_span::Span;
 use rustc_span::source_map::respan;
 use rustc_target::callconv::FnAbi;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 
 /// A minimal context needed for recording our results. This allows us to move ownership of the
@@ -447,17 +447,21 @@ impl GotocCtx<'_> {
             }
             // Recursively find quantifier expressions.
             StmtBody::Block(old_stmts) => {
-                let stmts = old_stmts
-                    .iter()
-                    .map(|stmt| self.handle_quantifiers_in_stmt(stmt, suffix_count))
-                    .collect::<Vec<Option<Stmt>>>();
+                let mut replaced_sub_stmts: HashMap<usize, Stmt> = HashMap::new();
+                
+                for i in 0..old_stmts.len() {
+                    let stmt = &old_stmts[i];
+                    if let Some(new_stmt) = self.handle_quantifiers_in_stmt(stmt, suffix_count) {
+                        replaced_sub_stmts.insert(i, new_stmt);
+                    }
+                }
 
-                if stmts.iter().all(Option::is_none) {
+                if replaced_sub_stmts.is_empty() {
                     None
                 } else {
                     Some(Stmt::block(
-                        stmts.into_iter().zip(old_stmts.iter()).map(|(new_stmt, old_stmt)| {
-                            new_stmt.unwrap_or(old_stmt.clone())
+                        old_stmts.iter().enumerate().map(|(i, old_stmt)| {
+                            replaced_sub_stmts.remove(&i).unwrap_or_else(|| old_stmt.clone())
                         }).collect(),
                         *stmt.location(),
                     ))
@@ -813,7 +817,7 @@ impl GotocCtx<'_> {
             StmtBody::While { .. } | StmtBody::For { .. } => {
                 unimplemented!()
             }
-            _ => Some(stmt.clone()),
+            _ => None,
         }
     }
 }
