@@ -316,25 +316,32 @@ impl GotocCtx<'_> {
     /// statement expressiont without function calls in quantifier expressions:
     /// see https://github.com/diffblue/cbmc/pull/8605 for detail.
     pub fn handle_quantifiers(&mut self) {
+        // let start = std::time::Instant::now();
+        // let b = std::hint::black_box(self.symbol_table.clone());
+        // println!("cloned symbol table in {:?}", start.elapsed());
         // Store the found quantifiers and the inlined results.
         let mut to_modify: BTreeMap<InternedString, SymbolValues> = BTreeMap::new();
         let mut suffix_count: u16 = 0;
         for (key, symbol) in self.symbol_table.iter() {
             if let SymbolValues::Stmt(stmt) = &symbol.value {
-                let new_stmt_val =
-                    SymbolValues::Stmt(self.handle_quantifiers_in_stmt(stmt, &mut suffix_count));
-                to_modify.insert(*key, new_stmt_val);
+                match self.handle_quantifiers_in_stmt(stmt, &mut suffix_count) {
+                    None => {},
+                    Some(new_stmt) => { to_modify.insert(*key, SymbolValues::Stmt(new_stmt)); },
+                };
             }
         }
+
+        // println!("to modify len is {:?} at {:?}", to_modify.len(), start.elapsed());
 
         // Update the found quantifiers with the inlined results.
         for (key, symbol_value) in to_modify {
             self.symbol_table.lookup_mut(key).unwrap().update(symbol_value);
         }
+        // println!("total quant behavior in {:?}", start.elapsed());
     }
 
     /// Find all quantifier expressions in `stmt` and recursively inline functions.
-    fn handle_quantifiers_in_stmt(&self, stmt: &Stmt, suffix_count: &mut u16) -> Stmt {
+    fn handle_quantifiers_in_stmt(&self, stmt: &Stmt, suffix_count: &mut u16) -> Option<Stmt> {
         match &stmt.body() {
             // According to the hook handling for quantifiers, quantifier expressions must be of form
             // lhs = typecast(qex, c_bool)
@@ -400,24 +407,34 @@ impl GotocCtx<'_> {
                             );
                             res.cast_to(Type::CInteger(CIntType::Bool))
                         }
-                        _ => rhs.clone(),
+                        _ => return None,
                     },
-                    _ => rhs.clone(),
+                    _ => return None,
                 };
-                Stmt::assign(lhs.clone(), new_rhs, *stmt.location())
+                Some(Stmt::assign(lhs.clone(), new_rhs, *stmt.location()))
             }
             // Recursively find quantifier expressions.
-            StmtBody::Block(stmts) => Stmt::block(
-                stmts
+            StmtBody::Block(old_stmts) => {
+                let stmts = old_stmts
                     .iter()
                     .map(|stmt| self.handle_quantifiers_in_stmt(stmt, suffix_count))
-                    .collect(),
-                *stmt.location(),
-            ),
+                    .collect::<Vec<Option<Stmt>>>();
+
+                if stmts.iter().all(Option::is_none) {
+                    None
+                } else {
+                    Some(Stmt::block(
+                        stmts.into_iter().zip(old_stmts.iter()).map(|(new_stmt, old_stmt)| {
+                            new_stmt.unwrap_or(old_stmt.clone())
+                        }).collect(),
+                        *stmt.location(),
+                    ))
+                }
+            },
             StmtBody::Label { label, body } => {
-                self.handle_quantifiers_in_stmt(body, suffix_count).with_label(*label)
+                Some(self.handle_quantifiers_in_stmt(body, suffix_count)?.with_label(*label))
             }
-            _ => stmt.clone(),
+            _ => return None,
         }
     }
 
