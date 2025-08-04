@@ -357,8 +357,10 @@ impl GotocCtx<'_> {
         for (key, symbol) in self.symbol_table.iter() {
             if let SymbolValues::Stmt(stmt) = &symbol.value {
                 match self.handle_quantifiers_in_stmt(stmt, &mut suffix_count) {
-                    None => {},
-                    Some(new_stmt) => { to_modify.insert(*key, SymbolValues::Stmt(new_stmt)); },
+                    None => {}
+                    Some(new_stmt) => {
+                        to_modify.insert(*key, SymbolValues::Stmt(new_stmt));
+                    }
                 };
             }
         }
@@ -448,9 +450,9 @@ impl GotocCtx<'_> {
             // Recursively find quantifier expressions.
             StmtBody::Block(old_stmts) => {
                 let mut replaced_sub_stmts: HashMap<usize, Stmt> = HashMap::new();
-                
-                for i in 0..old_stmts.len() {
-                    let stmt = &old_stmts[i];
+
+                // for each block, see if it should be replaced
+                for (i, stmt) in old_stmts.iter().enumerate() {
                     if let Some(new_stmt) = self.handle_quantifiers_in_stmt(stmt, suffix_count) {
                         replaced_sub_stmts.insert(i, new_stmt);
                     }
@@ -460,17 +462,21 @@ impl GotocCtx<'_> {
                     None
                 } else {
                     Some(Stmt::block(
-                        old_stmts.iter().enumerate().map(|(i, old_stmt)| {
-                            replaced_sub_stmts.remove(&i).unwrap_or_else(|| old_stmt.clone())
-                        }).collect(),
+                        old_stmts
+                            .iter()
+                            .enumerate()
+                            .map(|(i, old_stmt)| {
+                                replaced_sub_stmts.remove(&i).unwrap_or_else(|| old_stmt.clone())
+                            })
+                            .collect(),
                         *stmt.location(),
                     ))
                 }
-            },
+            }
             StmtBody::Label { label, body } => {
                 Some(self.handle_quantifiers_in_stmt(body, suffix_count)?.with_label(*label))
             }
-            _ => return None,
+            _ => None,
         }
     }
 
