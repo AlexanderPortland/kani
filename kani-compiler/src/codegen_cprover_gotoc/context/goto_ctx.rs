@@ -355,23 +355,17 @@ impl GotocCtx<'_> {
         let mut to_modify: BTreeMap<InternedString, SymbolValues> = BTreeMap::new();
         let mut suffix_count: u16 = 0;
         for (key, symbol) in self.symbol_table.iter() {
-            if let SymbolValues::Stmt(stmt) = &symbol.value {
-                match self.handle_quantifiers_in_stmt(stmt, &mut suffix_count) {
-                    None => {}
-                    Some(new_stmt) => {
-                        to_modify.insert(*key, SymbolValues::Stmt(new_stmt));
-                    }
-                };
+            if let SymbolValues::Stmt(stmt) = &symbol.value
+                && let Some(new_stmt) = self.handle_quantifiers_in_stmt(stmt, &mut suffix_count)
+            {
+                to_modify.insert(*key, SymbolValues::Stmt(new_stmt));
             }
         }
-
-        // println!("to modify len is {:?} at {:?}", to_modify.len(), start.elapsed());
 
         // Update the found quantifiers with the inlined results.
         for (key, symbol_value) in to_modify {
             self.symbol_table.lookup_mut(key).unwrap().update(symbol_value);
         }
-        // println!("total quant behavior in {:?}", start.elapsed());
     }
 
     /// Find all quantifier expressions in `stmt` and recursively inline functions.
@@ -451,7 +445,7 @@ impl GotocCtx<'_> {
             StmtBody::Block(old_stmts) => {
                 let mut replaced_sub_stmts: HashMap<usize, Stmt> = HashMap::new();
 
-                // for each block, see if it should be replaced
+                // For each block, add it and its index to the map if it should be replaced.
                 for (i, stmt) in old_stmts.iter().enumerate() {
                     if let Some(new_stmt) = self.handle_quantifiers_in_stmt(stmt, suffix_count) {
                         replaced_sub_stmts.insert(i, new_stmt);
@@ -459,8 +453,10 @@ impl GotocCtx<'_> {
                 }
 
                 if replaced_sub_stmts.is_empty() {
+                    // We can skip doing anything if none of the blocks have to be replaced.
                     None
                 } else {
+                    // Take the replacement block if replaced, otherwise just clone the old value.
                     Some(Stmt::block(
                         old_stmts
                             .iter()
@@ -722,19 +718,22 @@ impl GotocCtx<'_> {
             }
             // Recursively inline function calls in ops.
             ExprValue::BinOp { op, lhs, rhs } => {
-                return Some(
-                    self.inline_function_calls_in_expr(lhs, visited_func_symbols, suffix_count)
-                        .unwrap()
-                        .binop(
-                            *op,
-                            self.inline_function_calls_in_expr(
-                                rhs,
-                                visited_func_symbols,
-                                suffix_count,
-                            )
-                            .unwrap(),
-                        ),
-                );
+                match (
+                    self.inline_function_calls_in_expr(lhs, visited_func_symbols, suffix_count),
+                    self.inline_function_calls_in_expr(rhs, visited_func_symbols, suffix_count),
+                ) {
+                    // Neither has replacements, nothing to do.
+                    (None, None) => return None,
+                    // One or both have replacements, clone if not & make a new Expr.
+                    (new_lhs, new_rhs) => {
+                        let (new_lhs, new_rhs) = (
+                            new_lhs.unwrap_or_else(|| lhs.clone()),
+                            new_rhs.unwrap_or_else(|| rhs.clone()),
+                        );
+
+                        return Some(new_lhs.binop(*op, new_rhs));
+                    }
+                }
             }
             ExprValue::StatementExpression { statements, location: _ } => {
                 let inlined_stmts: Vec<Stmt> = statements
@@ -750,8 +749,8 @@ impl GotocCtx<'_> {
                 ));
             }
             _ => {}
-        }
-        Some(expr.clone())
+        };
+        None
     }
 
     /// Recursively inline all function calls in `stmt`.
