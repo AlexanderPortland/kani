@@ -323,8 +323,20 @@ impl Expr {
         &self.typ
     }
 
+    pub fn typ_mut(&mut self) -> &mut Type {
+        &mut self.typ
+    }
+
     pub fn value(&self) -> &ExprValue {
         &self.value
+    }
+
+    pub fn value_mut(&mut self) -> &mut ExprValue {
+        &mut self.value
+    }
+
+    pub fn all_mut(&mut self) -> (&mut Type, &Location, &mut ExprValue) {
+        (&mut self.typ, &self.location, &mut self.value)
     }
 
     pub fn size_of_annotation(&self) -> Option<&Type> {

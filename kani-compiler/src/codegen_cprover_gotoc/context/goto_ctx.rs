@@ -38,8 +38,8 @@ use rustc_middle::ty::{self, Ty, TyCtxt};
 use rustc_public::mir::Body;
 use rustc_public::mir::mono::Instance;
 use rustc_public::ty::Allocation;
-use rustc_span::Span;
 use rustc_span::source_map::respan;
+use rustc_span::{Span, sym};
 use rustc_target::callconv::FnAbi;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
@@ -354,61 +354,62 @@ impl GotocCtx<'_> {
         // Store the found quantifiers and the inlined results.
         let mut to_modify: BTreeMap<InternedString, SymbolValues> = BTreeMap::new();
         let mut suffix_count: u16 = 0;
-        for (key, symbol) in self.symbol_table.iter() {
-            if let SymbolValues::Stmt(stmt) = &symbol.value {
-                match self.handle_quantifiers_in_stmt(stmt, &mut suffix_count) {
-                    None => {},
-                    Some(new_stmt) => { to_modify.insert(*key, SymbolValues::Stmt(new_stmt)); },
-                };
+        let to_inline = self.symbol_table.keys();
+
+        self.symbol_table.map_all_individually(|symbol, other_symbols| {
+            if let SymbolValues::Stmt(stmt) = &mut symbol.value {
+                Self::handle_quantifiers_in_stmt(other_symbols, stmt, &mut suffix_count);
             }
-        }
-
-        // println!("to modify len is {:?} at {:?}", to_modify.len(), start.elapsed());
-
-        // Update the found quantifiers with the inlined results.
-        for (key, symbol_value) in to_modify {
-            self.symbol_table.lookup_mut(key).unwrap().update(symbol_value);
-        }
-        // println!("total quant behavior in {:?}", start.elapsed());
+        });
     }
 
     /// Find all quantifier expressions in `stmt` and recursively inline functions.
-    fn handle_quantifiers_in_stmt(&self, stmt: &Stmt, suffix_count: &mut u16) -> Option<Stmt> {
-        match &stmt.body() {
+    fn handle_quantifiers_in_stmt(
+        symbol_table: &SymbolTable,
+        stmt: &mut Stmt,
+        suffix_count: &mut u16,
+    ) {
+        match stmt.body_mut() {
             // According to the hook handling for quantifiers, quantifier expressions must be of form
             // lhs = typecast(qex, c_bool)
             // where qex is either a forall-expression or an exists-expression.
             StmtBody::Assign { lhs, rhs } => {
-                let new_rhs = match &rhs.value() {
-                    ExprValue::Typecast(quantified_expr) => match &quantified_expr.value() {
+                match rhs.all_mut() {
+                    (typ, loc, ExprValue::Typecast(quantified_expr)) => match quantified_expr
+                        .value_mut()
+                    {
                         ExprValue::Forall { variable, domain } => {
+                            // assert!(*typ == Type::Bool);
                             // We store the function symbols we have inlined to avoid recursion.
                             let mut visited_func_symbols: HashSet<InternedString> = HashSet::new();
                             // We count the number of function that we have inlined, and use the count to
                             // make inlined labeled unique.
                             //let mut suffix_count: u16 = 0;
 
-                            let end_stmt = Stmt::code_expression(
-                                self.inline_function_calls_in_expr(
-                                    domain,
-                                    &mut visited_func_symbols,
-                                    suffix_count,
-                                )
-                                .unwrap(),
-                                *domain.location(),
+                            Self::inline_function_calls_in_expr(
+                                symbol_table,
+                                domain,
+                                &mut visited_func_symbols,
+                                suffix_count,
                             );
 
                             // Make the result a statement expression.
+                            // todo!("check if this is the same...");
+                            // *rhs.typ_mut() = Type::Bool;
                             let res = Expr::forall_expr(
                                 Type::Bool,
                                 variable.clone(),
                                 Expr::statement_expression(
-                                    vec![Stmt::skip(*domain.location()), end_stmt],
-                                    Type::Bool,
-                                    *domain.location(),
-                                ),
-                            );
-                            res.cast_to(Type::CInteger(CIntType::Bool))
+                                vec![
+                                    Stmt::skip(*domain.location()),
+                                    Stmt::code_expression(domain.clone(), *domain.location()),
+                                ],
+                                Type::Bool,
+                                *domain.location(),
+                            ));
+                            // *typ = Type::Bool;
+
+                            *rhs = res.cast_to(Type::CInteger(CIntType::Bool))
                         }
                         ExprValue::Exists { variable, domain } => {
                             // We store the function symbols we have inlined to avoid recursion.
@@ -417,14 +418,11 @@ impl GotocCtx<'_> {
                             // make inlined labeled unique.
                             let mut suffix_count = 0;
 
-                            let end_stmt = Stmt::code_expression(
-                                self.inline_function_calls_in_expr(
-                                    domain,
-                                    &mut visited_func_symbols,
-                                    &mut suffix_count,
-                                )
-                                .unwrap(),
-                                *domain.location(),
+                            Self::inline_function_calls_in_expr(
+                                symbol_table,
+                                domain,
+                                &mut visited_func_symbols,
+                                &mut suffix_count,
                             );
 
                             // Make the result a statement expression.
@@ -432,45 +430,32 @@ impl GotocCtx<'_> {
                                 Type::Bool,
                                 variable.clone(),
                                 Expr::statement_expression(
-                                    vec![Stmt::skip(*domain.location()), end_stmt],
+                                    vec![
+                                        Stmt::skip(*domain.location()),
+                                        Stmt::code_expression(domain.clone(), *domain.location()),
+                                    ],
                                     Type::Bool,
                                     *domain.location(),
                                 ),
                             );
-                            res.cast_to(Type::CInteger(CIntType::Bool))
+                            *rhs = res.cast_to(Type::CInteger(CIntType::Bool));
                         }
-                        _ => return None,
+                        _ => return,
                     },
-                    _ => return None,
-                };
-                Some(Stmt::assign(lhs.clone(), new_rhs, *stmt.location()))
+                    _ => return,
+                }
+                *stmt = Stmt::assign(lhs.clone(), rhs.clone(), *stmt.location());
             }
             // Recursively find quantifier expressions.
             StmtBody::Block(old_stmts) => {
-                let mut replaced_sub_stmts: HashMap<usize, Stmt> = HashMap::new();
-                
-                for i in 0..old_stmts.len() {
-                    let stmt = &old_stmts[i];
-                    if let Some(new_stmt) = self.handle_quantifiers_in_stmt(stmt, suffix_count) {
-                        replaced_sub_stmts.insert(i, new_stmt);
-                    }
+                for stmt in old_stmts {
+                    Self::handle_quantifiers_in_stmt(symbol_table, stmt, suffix_count);
                 }
-
-                if replaced_sub_stmts.is_empty() {
-                    None
-                } else {
-                    Some(Stmt::block(
-                        old_stmts.iter().enumerate().map(|(i, old_stmt)| {
-                            replaced_sub_stmts.remove(&i).unwrap_or_else(|| old_stmt.clone())
-                        }).collect(),
-                        *stmt.location(),
-                    ))
-                }
-            },
-            StmtBody::Label { label, body } => {
-                Some(self.handle_quantifiers_in_stmt(body, suffix_count)?.with_label(*label))
             }
-            _ => return None,
+            StmtBody::Label { label, body } => {
+                Self::handle_quantifiers_in_stmt(symbol_table, body, suffix_count);
+            }
+            _ => return,
         }
     }
 
@@ -580,19 +565,20 @@ impl GotocCtx<'_> {
     /// `visited_func_symbols` contain all function symbols in the stack.
     /// `suffix_count` is used to make inlined labels unique.
     fn inline_function_calls_in_expr(
-        &self,
-        expr: &Expr,
+        symbol_table: &SymbolTable,
+        expr: &mut Expr,
         visited_func_symbols: &mut HashSet<InternedString>,
         suffix_count: &mut u16,
-    ) -> Option<Expr> {
-        match &expr.value() {
+    ) {
+        let (typ, loc, value) = expr.all_mut();
+        match value {
             // For function call expression, we find the function symbol and function body from the
             // symbol table for inlining.
             ExprValue::FunctionCall { function, arguments } => {
                 if let ExprValue::Symbol { identifier } = &function.value() {
                     // Check if the function symbol exists in the symbol table
                     if let Some(function_body) =
-                        self.symbol_table.lookup(*identifier).and_then(|sym| match &sym.value {
+                        symbol_table.lookup(*identifier).and_then(|sym| match &sym.value {
                             SymbolValues::Stmt(stmt) => Some(stmt),
                             _ => None,
                         })
@@ -628,7 +614,7 @@ impl GotocCtx<'_> {
                             inlined_body.get_stmts().unwrap().clone();
 
                         // Substitute parameters with arguments in the function body.
-                        if let Some(parameters) = self.symbol_table.lookup_parameters(*identifier) {
+                        if let Some(parameters) = symbol_table.lookup_parameters(*identifier) {
                             // Create decl statements of parameters.
                             let mut param_decls: Vec<Stmt> = parameters
                                 .iter()
@@ -668,7 +654,7 @@ impl GotocCtx<'_> {
                             .sum();
                         // The function is a void function, we safely ignore it.
                         if count_return == 0 {
-                            return None;
+                            return;
                         }
                         // For simplicity, we currently only handle cases with one return statement.
                         assert_eq!(count_return, 1);
@@ -690,25 +676,23 @@ impl GotocCtx<'_> {
                                 Self::rewrite_return_stmt_with_goto(stmt, &mut end_stmt, &end_label)
                             })
                             .collect();
-                        stmts_of_inlined_body
-                            .push(Stmt::skip(*expr.location()).with_label(end_label));
-                        stmts_of_inlined_body
-                            .push(Stmt::code_expression(end_stmt.unwrap(), *expr.location()));
+                        stmts_of_inlined_body.push(Stmt::skip(*loc).with_label(end_label));
+                        stmts_of_inlined_body.push(Stmt::code_expression(end_stmt.unwrap(), *loc));
+
+                        let mut new_body =
+                            Expr::statement_expression(stmts_of_inlined_body, typ.clone(), *loc);
 
                         // Recursively inline function calls in the function body.
-                        let res = self.inline_function_calls_in_expr(
-                            &Expr::statement_expression(
-                                stmts_of_inlined_body,
-                                expr.typ().clone(),
-                                *expr.location(),
-                            ),
+                        Self::inline_function_calls_in_expr(
+                            symbol_table,
+                            &mut new_body,
                             visited_func_symbols,
                             suffix_count,
                         );
 
                         visited_func_symbols.remove(identifier);
 
-                        return res;
+                        *expr = new_body;
                     } else {
                         unreachable!()
                     }
@@ -716,108 +700,106 @@ impl GotocCtx<'_> {
             }
             // Recursively inline function calls in ops.
             ExprValue::BinOp { op, lhs, rhs } => {
-                return Some(
-                    self.inline_function_calls_in_expr(lhs, visited_func_symbols, suffix_count)
-                        .unwrap()
-                        .binop(
-                            *op,
-                            self.inline_function_calls_in_expr(
-                                rhs,
-                                visited_func_symbols,
-                                suffix_count,
-                            )
-                            .unwrap(),
-                        ),
+                Self::inline_function_calls_in_expr(
+                    symbol_table,
+                    lhs,
+                    visited_func_symbols,
+                    suffix_count,
+                );
+                Self::inline_function_calls_in_expr(
+                    symbol_table,
+                    rhs,
+                    visited_func_symbols,
+                    suffix_count,
                 );
             }
             ExprValue::StatementExpression { statements, location: _ } => {
-                let inlined_stmts: Vec<Stmt> = statements
-                    .iter()
-                    .filter_map(|stmt| {
-                        self.inline_function_calls_in_stmt(stmt, visited_func_symbols, suffix_count)
-                    })
-                    .collect();
-                return Some(Expr::statement_expression(
-                    inlined_stmts,
-                    expr.typ().clone(),
-                    *expr.location(),
-                ));
+                for stmt in statements {
+                    Self::inline_function_calls_in_stmt(
+                        symbol_table,
+                        stmt,
+                        visited_func_symbols,
+                        suffix_count,
+                    );
+                }
             }
             _ => {}
         }
-        Some(expr.clone())
     }
 
     /// Recursively inline all function calls in `stmt`.
     /// `visited_func_symbols` contain all function symbols in the stack.
     /// `suffix_count` is used to make inlined labels unique.
     fn inline_function_calls_in_stmt(
-        &self,
-        stmt: &Stmt,
+        symbol_table: &SymbolTable,
+        stmt: &mut Stmt,
         visited_func_symbols: &mut HashSet<InternedString>,
         suffix_count: &mut u16,
-    ) -> Option<Stmt> {
-        match stmt.body() {
-            StmtBody::Expression(expr) => self
-                .inline_function_calls_in_expr(expr, visited_func_symbols, suffix_count)
-                .map(|inlined_expr| Stmt::code_expression(inlined_expr, *expr.location())),
-            StmtBody::Assign { lhs, rhs } => self
-                .inline_function_calls_in_expr(rhs, visited_func_symbols, suffix_count)
-                .map(|inlined_rhs| Stmt::assign(lhs.clone(), inlined_rhs, *stmt.location())),
+    ) {
+        match stmt.body_mut() {
+            StmtBody::Expression(expr) => Self::inline_function_calls_in_expr(
+                symbol_table,
+                expr,
+                visited_func_symbols,
+                suffix_count,
+            ),
+            StmtBody::Assign { lhs: _, rhs } => Self::inline_function_calls_in_expr(
+                symbol_table,
+                rhs,
+                visited_func_symbols,
+                suffix_count,
+            ),
             StmtBody::Block(stmts) => {
-                let inlined_block = stmts
-                    .iter()
-                    .filter_map(|s| {
-                        self.inline_function_calls_in_stmt(s, visited_func_symbols, suffix_count)
-                    })
-                    .collect();
-                Some(Stmt::block(inlined_block, *stmt.location()))
-            }
-            StmtBody::Label { label, body } => {
-                match self.inline_function_calls_in_stmt(body, visited_func_symbols, suffix_count) {
-                    None => Some(Stmt::skip(*stmt.location()).with_label(*label)),
-                    Some(inlined_body) => Some(inlined_body.with_label(*label)),
+                for stmt in stmts {
+                    Self::inline_function_calls_in_stmt(
+                        symbol_table,
+                        stmt,
+                        visited_func_symbols,
+                        suffix_count,
+                    );
                 }
+            }
+            StmtBody::Label { label: _, body } => {
+                Self::inline_function_calls_in_stmt(
+                    symbol_table,
+                    body,
+                    visited_func_symbols,
+                    suffix_count,
+                );
             }
             StmtBody::Switch { control, cases, default } => {
                 // Inline function calls in the discriminant expression
-                let inlined_control = self
-                    .inline_function_calls_in_expr(control, visited_func_symbols, suffix_count)
-                    .unwrap_or_else(|| control.clone());
+                Self::inline_function_calls_in_expr(
+                    symbol_table,
+                    control,
+                    visited_func_symbols,
+                    suffix_count,
+                );
 
                 // Inline function calls in each case
-                let inlined_cases: Vec<_> = cases
-                    .iter()
-                    .map(|sc| {
-                        let inlined_stmt = self
-                            .inline_function_calls_in_stmt(
-                                sc.body(),
-                                visited_func_symbols,
-                                suffix_count,
-                            )
-                            .unwrap_or_else(|| sc.body().clone());
-                        SwitchCase::new(sc.case().clone(), inlined_stmt)
-                    })
-                    .collect();
+                for case in cases {
+                    Self::inline_function_calls_in_stmt(
+                        symbol_table,
+                        case.body_mut(),
+                        visited_func_symbols,
+                        suffix_count,
+                    );
+                }
 
                 // Inline function calls in the default case, if it exists
-                let inlined_default = default.as_ref().map(|stmt| {
-                    self.inline_function_calls_in_stmt(stmt, visited_func_symbols, suffix_count)
-                        .unwrap_or_else(|| stmt.clone())
+                default.as_mut().map(|stmt| {
+                    Self::inline_function_calls_in_stmt(
+                        symbol_table,
+                        stmt,
+                        visited_func_symbols,
+                        suffix_count,
+                    );
                 });
-
-                // Construct the new switch statement
-                Some(Stmt::switch(
-                    inlined_control,
-                    inlined_cases,
-                    inlined_default,
-                    *stmt.location(),
-                ))
             }
             StmtBody::While { .. } | StmtBody::For { .. } => {
                 unimplemented!()
             }
-            _ => Some(stmt.clone()),
+            _ => {}
         }
     }
 }

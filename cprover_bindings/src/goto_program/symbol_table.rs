@@ -84,6 +84,19 @@ impl SymbolTable {
         self.symbol_table.insert(new_value.name, new_value);
     }
 
+    pub fn map_all_individually<F: FnMut(&mut Symbol, &SymbolTable)>(&mut self, mut f: F) {
+        let keys_to_apply_to = self.symbol_table.keys().cloned().collect::<Vec<_>>();
+
+        for key in keys_to_apply_to {
+            let mut el = self
+                .symbol_table
+                .remove(&key)
+                .expect("keys_to_apply should only generate keys that are in the map!");
+            f(&mut el, &self);
+            self.symbol_table.insert(key, el);
+        }
+    }
+
     /// Replace an incomplete struct or union with a complete struct or union
     pub fn replace_with_completion(&mut self, new_symbol: Symbol) {
         self.replace(|old_symbol| new_symbol.completes(old_symbol), new_symbol.clone())
@@ -118,6 +131,10 @@ impl SymbolTable {
 
     pub fn iter(&self) -> std::collections::btree_map::Iter<'_, InternedString, Symbol> {
         self.symbol_table.iter()
+    }
+
+    pub fn keys(&self) -> Vec<InternedString> {
+        self.symbol_table.keys().cloned().collect()
     }
 
     pub fn iter_mut(&mut self) -> std::collections::btree_map::IterMut<'_, InternedString, Symbol> {

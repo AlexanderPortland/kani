@@ -133,6 +133,10 @@ impl Stmt {
         &self.body
     }
 
+    pub fn body_mut(&mut self) -> &mut StmtBody {
+        &mut self.body
+    }
+
     pub fn location(&self) -> &Location {
         &self.location
     }
@@ -406,5 +410,9 @@ impl SwitchCase {
 
     pub fn body(&self) -> &Stmt {
         &self.body
+    }
+
+    pub fn body_mut(&mut self) -> &mut Stmt {
+        &mut self.body
     }
 }
