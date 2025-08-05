@@ -47,6 +47,7 @@ use rustc_session::output::out_filename;
 use rustc_span::{Symbol, sym};
 use rustc_target::spec::PanicStrategy;
 use std::any::Any;
+use std::cell::RefCell;
 use std::cmp::min;
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -94,7 +95,7 @@ impl GotocCodegenBackend {
         machine_model: &MachineModel,
         check_contract: Option<InternalDefId>,
         mut global_passes: GlobalPasses,
-        mut transformer: BodyTransformation,
+        transformer: &mut BodyTransformation,
         thread_pool: &ThreadPool,
     ) -> (MinimalGotocCtx, Vec<MonoItem>, Option<AssignsContract>) {
         // Retrieve all instances from the currently codegened items.
@@ -113,7 +114,7 @@ impl GotocCodegenBackend {
 
         // Apply all transformation passes, including global passes.
         let any_pass_modified = global_passes.run_global_passes(
-            &mut transformer,
+            transformer,
             tcx,
             &reachability.starting,
             instances,
@@ -124,7 +125,7 @@ impl GotocCodegenBackend {
         // since global pass could add extra calls to instrumentation.
         if any_pass_modified {
             (reachability.reachable, _) = with_timer(
-                || collect_reachable_items(tcx, &mut transformer, &reachability.starting),
+                || collect_reachable_items(tcx, transformer, &reachability.starting),
                 "codegen reachability analysis (second pass)",
             );
         }
@@ -286,18 +287,26 @@ fn reachability_analysis_fn_for_harness<'a>(
     unit: &CodegenUnit,
     queries: &QueryDb,
     tcx: TyCtxt,
-) -> impl Fn(&'a Harness) -> (HarnessWithReachable<'a>, BodyTransformation) {
-    let template_transformer = Rc::new(BodyTransformation::new(queries, tcx, unit));
+) -> impl Fn(&'a Harness) -> (HarnessWithReachable<'a>, Rc<RefCell<BodyTransformation>>) {
+    let shared_unit_transformer =
+        Rc::new(RefCell::new(BodyTransformation::new(queries, tcx, unit)));
 
     move |harness: &'a Harness| {
-        let mut transformer = template_transformer.clone_empty();
+        let my_ref_to_transformer = shared_unit_transformer.clone();
+        // let mut transformer = my_ref_to_transformer.borrow_mut();
 
         let info = with_timer(
-            || ReachabilityInfo::generate_from(tcx, &mut transformer, vec![MonoItem::Fn(*harness)]),
+            || {
+                ReachabilityInfo::generate_from(
+                    tcx,
+                    &mut shared_unit_transformer.borrow_mut(),
+                    vec![MonoItem::Fn(*harness)],
+                )
+            },
             "codegen reachability analysis",
         );
 
-        ((harness, info), transformer)
+        ((harness, info), my_ref_to_transformer)
     }
 }
 
@@ -454,7 +463,7 @@ impl CodegenBackend for GotocCodegenBackend {
                             &results.machine_model,
                             contract_metadata,
                             template_passes.clone(),
-                            transformer,
+                            &mut transformer.borrow_mut(),
                             &export_thread_pool,
                         );
                         if min_gcx.has_loop_contracts {
@@ -494,11 +503,11 @@ impl CodegenBackend for GotocCodegenBackend {
                         &results.machine_model,
                         Default::default(),
                         GlobalPasses::new(&queries, tcx),
-                        transformer,
+                        &mut transformer,
                         &export_thread_pool,
                     );
                     assert!(contract_info.is_none());
-                    let _ = results.extend(gcx, items, None);
+                    results.extend(gcx, items, None);
                 }
             }
 
@@ -755,13 +764,12 @@ impl GotoCodegenResults {
         min_gcx: context::MinimalGotocCtx,
         items: Vec<MonoItem>,
         metadata: Option<HarnessMetadata>,
-    ) -> BodyTransformation {
+    ) {
         let mut items = items;
         self.harnesses.extend(metadata);
         self.concurrent_constructs.extend(min_gcx.concurrent_constructs);
         self.unsupported_constructs.extend(min_gcx.unsupported_constructs);
         self.items.append(&mut items);
-        min_gcx.transformer
     }
 
     /// Prints a report at the end of the compilation.

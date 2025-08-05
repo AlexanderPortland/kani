@@ -10,9 +10,7 @@
 //!
 //! This module currently provides a simple [MostReachableItems] heuristic to combat that, but more
 //! complex heuristics might be able to improve on this or avoid other kinds of pitfalls.
-use crate::{
-    codegen_cprover_gotoc::HarnessWithReachable, kani_middle::transform::BodyTransformation,
-};
+use crate::codegen_cprover_gotoc::HarnessWithReachable;
 
 /// Orders harnesses within a [CodegenUnit](crate::kani_middle::codegen_units::CodegenUnit) based on
 /// **the raw number of items found during reachability analysis**, putting those with more first.
@@ -33,8 +31,8 @@ pub trait CodegenHeuristic {
     fn evaluate_harness(harness: &HarnessWithReachable) -> usize;
 }
 
-fn reorder_harnesses<'a, H: CodegenHeuristic>(
-    harnesses: &mut Vec<(HarnessWithReachable<'a>, BodyTransformation)>,
+fn reorder_harnesses<'a, H: CodegenHeuristic, T>(
+    harnesses: &mut Vec<(HarnessWithReachable<'a>, T)>,
 ) {
     // Sort is ascending by default, so `usize::MAX - ...` ensures higher rated harnesses come first.
     // We don't care about stability, and for cheap heuristic fns like the one for `MostReachableItems`,
@@ -50,15 +48,15 @@ pub trait HeuristicOrderable: Iterator {
     fn apply_ordering_heuristic<T: CodegenHeuristic>(self) -> impl Iterator<Item = Self::Item>;
 }
 
-impl<'a, I> HeuristicOrderable for I
+impl<'a, I, T> HeuristicOrderable for I
 where
-    I: Iterator<Item = Vec<(HarnessWithReachable<'a>, BodyTransformation)>>,
+    I: Iterator<Item = Vec<(HarnessWithReachable<'a>, T)>>,
 {
     /// Apply an codegen ordering heuristic to an iterator over codegen units.
     fn apply_ordering_heuristic<H: CodegenHeuristic>(self) -> impl Iterator<Item = I::Item> {
         // Reorder harnesses within each codegen unit according to `T`.
         self.map(|mut harnesses| {
-            reorder_harnesses::<H>(&mut harnesses);
+            reorder_harnesses::<H, T>(&mut harnesses);
             harnesses
         })
         .collect::<Vec<_>>()
