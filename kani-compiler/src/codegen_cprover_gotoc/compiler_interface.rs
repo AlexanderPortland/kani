@@ -54,6 +54,7 @@ use std::fs::File;
 use std::io::BufWriter;
 use std::num::NonZero;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread::available_parallelism;
 use std::time::Instant;
@@ -92,6 +93,7 @@ impl GotocCodegenBackend {
         symtab_goto: &Path,
         machine_model: &MachineModel,
         check_contract: Option<InternalDefId>,
+        mut global_passes: GlobalPasses,
         mut transformer: BodyTransformation,
         thread_pool: &ThreadPool,
     ) -> (MinimalGotocCtx, Vec<MonoItem>, Option<AssignsContract>) {
@@ -110,7 +112,6 @@ impl GotocCodegenBackend {
             .collect();
 
         // Apply all transformation passes, including global passes.
-        let mut global_passes = GlobalPasses::new(&self.queries.lock().unwrap(), tcx);
         let any_pass_modified = global_passes.run_global_passes(
             &mut transformer,
             tcx,
@@ -284,8 +285,10 @@ fn reachability_analysis_fn_for_harness<'a>(
     queries: &QueryDb,
     tcx: TyCtxt,
 ) -> impl Fn(&'a Harness) -> (HarnessWithReachable<'a>, BodyTransformation) {
+    let template_transformer = Rc::new(BodyTransformation::new(queries, tcx, unit));
+
     move |harness: &'a Harness| {
-        let mut transformer = BodyTransformation::new(queries, tcx, unit);
+        let mut transformer = template_transformer.clone_empty();
 
         let info = with_timer(
             || ReachabilityInfo::generate_from(tcx, &mut transformer, vec![MonoItem::Fn(*harness)]),
@@ -415,6 +418,7 @@ impl CodegenBackend for GotocCodegenBackend {
                     // First, do cross-crate collection of all items that are reachable from each harness. The resulting
                     // iterator has the reachability result for each harness, but also the transformer that harness used so
                     // we can reuse it during codegen.
+
                     let ordered_harnesses = units.iter().map(|unit| {
                         unit.harnesses
                             .iter()
@@ -432,6 +436,8 @@ impl CodegenBackend for GotocCodegenBackend {
                     // call graph could be used, for example, in resolving function pointer or vtable calls for
                     // global passes that need this.
 
+                    let template_passes = GlobalPasses::new(&queries, tcx);
+
                     // Then, actually codegen those reachable items for each.
                     for ((harness, reachability), transformer) in ordered_harnesses {
                         let model_path = units.harness_model_path(*harness).unwrap();
@@ -445,6 +451,7 @@ impl CodegenBackend for GotocCodegenBackend {
                             model_path,
                             &results.machine_model,
                             contract_metadata,
+                            template_passes.clone(),
                             transformer,
                             &export_thread_pool,
                         );
@@ -484,6 +491,7 @@ impl CodegenBackend for GotocCodegenBackend {
                         &model_path,
                         &results.machine_model,
                         Default::default(),
+                        GlobalPasses::new(&queries, tcx),
                         transformer,
                         &export_thread_pool,
                     );
