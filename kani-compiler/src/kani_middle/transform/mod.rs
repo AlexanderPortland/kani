@@ -64,6 +64,22 @@ pub struct BodyTransformation {
     inst_passes: Vec<Box<dyn ClonableTransformPass>>,
     /// Cache transformation results.
     cache: HashMap<Instance, TransformationResult>,
+
+    stats: BodyCacheStats,
+}
+
+#[derive(Default, Debug)]
+struct BodyCacheStats {
+    hits_modified: usize,
+    hits_non_modified: usize,
+    miss_modified: usize,
+    miss_non_modified: usize,
+}
+
+impl Drop for BodyCacheStats {
+    fn drop(&mut self) {
+        println!("stats on drop are {:?}", self);
+    }
 }
 
 impl BodyTransformation {
@@ -72,6 +88,7 @@ impl BodyTransformation {
             stub_passes: vec![],
             inst_passes: vec![],
             cache: Default::default(),
+            stats: Default::default(),
         };
         let safety_check_type = CheckType::new_safety_check_assert_assume(queries);
         let unsupported_check_type = CheckType::new_unsupported_check_assert_assume_false(queries);
@@ -116,6 +133,13 @@ impl BodyTransformation {
         &self
             .cache
             .entry(instance)
+            .and_modify(|entry| {
+                if entry.1 {
+                    self.stats.hits_modified += 1;
+                } else {
+                    self.stats.hits_non_modified += 1;
+                }
+            })
             .or_insert_with(|| {
                 let mut body = instance.body().unwrap();
 
@@ -124,6 +148,12 @@ impl BodyTransformation {
                     let result = pass.transform(tcx, body, instance);
                     modified |= result.0;
                     body = result.1;
+                }
+
+                if modified {
+                    self.stats.miss_modified += 1;
+                } else {
+                    self.stats.miss_non_modified += 1;
                 }
 
                 TransformationResult(body, modified)
@@ -138,17 +168,6 @@ impl BodyTransformation {
     /// assume that. Use `instance.has_body()` to check if an instance has a body.
     pub fn body(&mut self, tcx: TyCtxt, instance: Instance) -> Body {
         self.body_ref(tcx, instance).clone()
-    }
-
-    /// Clone an empty [BodyTransformation] for use within the same [CodegenUnit] and [TyCtxt] that were
-    /// used to create it. Will panic if the transformer has already been queried with `.body()`.
-    pub fn clone_empty(&self) -> Self {
-        debug_assert!(self.cache.is_empty());
-        BodyTransformation {
-            stub_passes: self.stub_passes.to_vec(),
-            inst_passes: self.inst_passes.to_vec(),
-            cache: HashMap::new(),
-        }
     }
 
     fn add_pass<P: ClonableTransformPass + 'static>(&mut self, query_db: &QueryDb, pass: P) {
