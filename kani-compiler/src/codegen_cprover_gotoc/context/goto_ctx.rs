@@ -106,7 +106,7 @@ pub struct GotocCtx<'tcx, 'r> {
     /// warning at each occurrence.
     pub concurrent_constructs: UnsupportedConstructs,
     /// The body transformation agent.
-    pub transformer: &'r mut BodyTransformation,
+    pub transformer: Option<&'r mut BodyTransformation>,
     /// If there exist some usage of loop contracts int context.
     pub has_loop_contracts: bool,
     /// Track loop assign clause
@@ -140,7 +140,7 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
             global_checks_count: 0,
             unsupported_constructs: FxHashMap::default(),
             concurrent_constructs: FxHashMap::default(),
-            transformer,
+            transformer: Some(transformer),
             has_loop_contracts: false,
             current_loop_modifies: Vec::new(),
         }

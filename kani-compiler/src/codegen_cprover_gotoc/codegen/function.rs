@@ -73,8 +73,8 @@ impl GotocCtx<'_, '_> {
             assert!(old_sym.is_function());
 
             // freaky but i think it'll work, relying on the fact that no other method touches the transformer reference
-            let mut owned_transformer = std::mem::take(self.transformer);
-            let body = owned_transformer.body_ref(self.tcx, instance);
+            let mut owned_transformer = std::mem::take(&mut self.transformer);
+            let body = owned_transformer.as_mut().unwrap().body_ref(self.tcx, instance);
             self.set_current_fn(instance, body);
             self.print_instance(instance, body);
             self.codegen_function_prelude(body);
@@ -83,7 +83,8 @@ impl GotocCtx<'_, '_> {
             // Get the order from internal body for now.
             reverse_postorder(body).for_each(|bb| self.codegen_block(bb, &body.blocks[bb]));
 
-            debug_assert!(std::mem::replace(self.transformer, owned_transformer).cache_is_empty());
+            let old = std::mem::replace(&mut self.transformer, owned_transformer);
+            debug_assert!(old.is_none());
 
             let loc = self.codegen_span_stable(instance.def.span());
             let stmts = self.current_fn_mut().extract_block();
@@ -218,8 +219,8 @@ impl GotocCtx<'_, '_> {
     pub fn declare_function(&mut self, instance: Instance) {
         debug!("declaring {}; {:?}", instance.name(), instance);
 
-        // let mut owned_transformer = std::mem::take(self.transformer);
-        let body = self.transformer.body(self.tcx, instance);
+        let mut owned_transformer = std::mem::take(&mut self.transformer);
+        let body = owned_transformer.as_mut().unwrap().body_ref(self.tcx, instance);
 
         self.set_current_fn(instance, &body);
         debug!(krate=?instance.def.krate(), is_std=self.current_fn().is_std(), "declare_function");
@@ -232,7 +233,8 @@ impl GotocCtx<'_, '_> {
             self.codegen_span_stable(instance.def.span()),
         );
 
-        // debug_assert!(std::mem::replace(self.transformer, owned_transformer).cache_is_empty());
+        let old = std::mem::replace(&mut self.transformer, owned_transformer);
+        debug_assert!(old.is_none());
 
         if !self.symbol_table.contains((&fname).into()) {
             self.symbol_table.insert(sym);

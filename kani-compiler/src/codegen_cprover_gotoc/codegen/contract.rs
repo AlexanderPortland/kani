@@ -91,7 +91,7 @@ impl GotocCtx<'_, '_> {
         let contract_attrs =
             KaniAttributes::for_instance(self.tcx, instance).contract_attributes()?;
         let mut find_closure = |inside: Instance, name: &str| {
-            let body = self.transformer.body_ref(self.tcx, inside);
+            let body = self.transformer.as_mut().unwrap().body_ref(self.tcx, inside);
             body.var_debug_info.iter().find_map(|var_info| {
                 if var_info.name.as_str() == name {
                     let ty = match &var_info.value {
@@ -229,7 +229,7 @@ impl GotocCtx<'_, '_> {
         // This should be safe, since the contract is pretty much evaluated as
         // though it was the first (or last) assertion in the function.
         assert!(self.current_fn.is_none());
-        let body = self.transformer.body(self.tcx, instance);
+        let body = self.transformer.as_mut().unwrap().body(self.tcx, instance);
         self.set_current_fn(instance, &body);
         let mangled_name = instance.mangled_name();
         let goto_contract = self.codegen_modifies_contract(

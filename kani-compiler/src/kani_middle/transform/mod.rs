@@ -55,7 +55,7 @@ mod stubs;
 ///
 /// The order however is always the same, we run optimizations first, and instrument the code
 /// after.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct BodyTransformation {
     /// The passes that may change the function body according to harness configuration.
     /// The stubbing passes should be applied before so user stubs take precedence.
@@ -138,10 +138,6 @@ impl BodyTransformation {
     /// assume that. Use `instance.has_body()` to check if an instance has a body.
     pub fn body(&mut self, tcx: TyCtxt, instance: Instance) -> Body {
         self.body_ref(tcx, instance).clone()
-    }
-
-    pub fn cache_is_empty(&self) -> bool {
-        self.cache.is_empty()
     }
 
     fn add_pass<P: ClonableTransformPass + 'static>(&mut self, query_db: &QueryDb, pass: P) {
