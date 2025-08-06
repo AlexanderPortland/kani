@@ -71,14 +71,19 @@ impl GotocCtx<'_, '_> {
             debug!("Double codegen of {:?}", old_sym);
         } else {
             assert!(old_sym.is_function());
-            let body = self.transformer.body(self.tcx, instance);
-            self.set_current_fn(instance, &body);
-            self.print_instance(instance, &body);
-            self.codegen_function_prelude(&body);
-            self.codegen_declare_variables(&body, name.clone().into());
 
+            // freaky but i think it'll work, relying on the fact that no other method touches the transformer reference
+            let mut owned_transformer = std::mem::take(self.transformer);
+            let body = owned_transformer.body_ref(self.tcx, instance);
+            self.set_current_fn(instance, body);
+            self.print_instance(instance, body);
+            self.codegen_function_prelude(body);
+            self.codegen_declare_variables(body, name.clone().into());
+            
             // Get the order from internal body for now.
-            reverse_postorder(&body).for_each(|bb| self.codegen_block(bb, &body.blocks[bb]));
+            reverse_postorder(body).for_each(|bb| self.codegen_block(bb, &body.blocks[bb]));
+
+            debug_assert!(std::mem::replace(self.transformer, owned_transformer).cache_is_empty());
 
             let loc = self.codegen_span_stable(instance.def.span());
             let stmts = self.current_fn_mut().extract_block();
@@ -212,7 +217,10 @@ impl GotocCtx<'_, '_> {
 
     pub fn declare_function(&mut self, instance: Instance) {
         debug!("declaring {}; {:?}", instance.name(), instance);
+
+        // let mut owned_transformer = std::mem::take(self.transformer);
         let body = self.transformer.body(self.tcx, instance);
+
         self.set_current_fn(instance, &body);
         debug!(krate=?instance.def.krate(), is_std=self.current_fn().is_std(), "declare_function");
         let fname = instance.mangled_name();
@@ -223,6 +231,9 @@ impl GotocCtx<'_, '_> {
             instance.name(),
             self.codegen_span_stable(instance.def.span()),
         );
+
+        // debug_assert!(std::mem::replace(self.transformer, owned_transformer).cache_is_empty());
+
         if !self.symbol_table.contains((&fname).into()) {
             self.symbol_table.insert(sym);
         } else {
