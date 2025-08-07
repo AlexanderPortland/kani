@@ -74,6 +74,16 @@ impl std::hash::Hash for SpanWrapper {
     }
 }
 
+// #[derive(Clone, PartialEq, Eq)]
+// pub struct RvalueWrapper(pub rustc_public::mir::Rvalue);
+
+#[derive(Default)]
+pub struct CodegenCache {
+    pub spans: FxHashMap<SpanWrapper, Location>,
+    pub types: FxHashMap<rustc_public::ty::Ty, Type>,
+    pub rvalues: FxHashMap<SpanWrapper, Location>,
+}
+
 pub struct GotocCtx<'tcx, 'r> {
     /// the typing context
     pub tcx: TyCtxt<'tcx>,
@@ -89,7 +99,7 @@ pub struct GotocCtx<'tcx, 'r> {
     pub global_var_count: u64,
     /// map a global allocation to a name in the symbol table
     pub alloc_map: FxHashMap<Allocation, String>,
-    pub span_cache: RefCell<FxHashMap<SpanWrapper, Location>>,
+    pub cache: RefCell<CodegenCache>,
     /// map (trait, method) pairs to possible implementations
     pub vtable_ctx: VtableCtx,
     pub current_fn: Option<CurrentFnCtx<'tcx>>,
@@ -134,7 +144,7 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
             alloc_map: FxHashMap::default(),
             vtable_ctx: VtableCtx::new(emit_vtable_restrictions),
             current_fn: None,
-            span_cache: RefCell::new(FxHashMap::default()),
+            cache: Default::default(),
             type_map: FxHashMap::default(),
             str_literals: FxHashMap::default(),
             global_checks_count: 0,

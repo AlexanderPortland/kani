@@ -39,7 +39,7 @@ impl GotocCtx<'_, '_> {
 
     pub fn codegen_span_stable(&self, sp: SpanStable) -> Location {
         // let start = std::time::Instant::now();
-        if let Some(cached_loc) = self.span_cache.borrow_mut().get(&SpanWrapper(sp)) {
+        if let Some(cached_loc) = self.cache.borrow().spans.get(&SpanWrapper(sp)) {
             let mut res = *cached_loc;
 
             // have to set the current function too (this is different even with the same span)
@@ -49,7 +49,7 @@ impl GotocCtx<'_, '_> {
             return res;
         }
         // Attribute to mark functions as where automatic pointer checks should not be generated.
-        let should_skip_ptr_checks_attr = vec![
+        let should_skip_ptr_checks_attr = [
             rustc_span::symbol::Symbol::intern("kanitool"),
             rustc_span::symbol::Symbol::intern("disable_checks"),
         ];
@@ -88,7 +88,7 @@ impl GotocCtx<'_, '_> {
         );
 
         assert!(
-            self.span_cache.borrow_mut().insert(SpanWrapper(sp), res).is_none(),
+            self.cache.borrow_mut().spans.insert(SpanWrapper(sp), res).is_none(),
             "shouldn't be anything in the cache or we would've used that val..."
         );
 

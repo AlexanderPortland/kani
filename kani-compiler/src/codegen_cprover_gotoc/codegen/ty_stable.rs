@@ -21,7 +21,15 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
     }
 
     pub fn codegen_ty_stable(&mut self, ty: Ty) -> Type {
-        self.codegen_ty(rustc_internal::internal(self.tcx, ty))
+        if let Some(ty) = self.cache.borrow().types.get(&ty) {
+            return ty.clone();
+        } else {
+            let new_ty = self.codegen_ty(rustc_internal::internal(self.tcx, ty));
+
+            self.cache.borrow_mut().types.insert(ty, new_ty.clone());
+
+            return new_ty;
+        }
     }
 
     pub fn codegen_ty_ref_stable(&mut self, ty: Ty) -> Type {
