@@ -16,9 +16,9 @@
 //! this structure as input.
 use super::current_fn::CurrentFnCtx;
 use super::vtable_ctx::VtableCtx;
-use crate::codegen_cprover_gotoc::UnsupportedConstructs;
 use crate::codegen_cprover_gotoc::overrides::{GotocHooks, fn_hooks};
 use crate::codegen_cprover_gotoc::utils::full_crate_name;
+use crate::codegen_cprover_gotoc::{UnsupportedConstructs, clear_codegen_cache};
 use crate::kani_middle::transform::BodyTransformation;
 use crate::kani_queries::QueryDb;
 use cbmc::goto_program::{
@@ -121,6 +121,7 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
         machine_model: &MachineModel,
         transformer: &'r mut BodyTransformation,
     ) -> GotocCtx<'tcx, 'r> {
+        clear_codegen_cache();
         let fhks = fn_hooks();
         let symbol_table = SymbolTable::new(machine_model.clone());
         let emit_vtable_restrictions = queries.args().emit_vtable_restrictions;

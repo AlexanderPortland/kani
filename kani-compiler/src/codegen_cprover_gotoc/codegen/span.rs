@@ -4,6 +4,7 @@
 //! MIR Span related functions
 
 use crate::codegen_cprover_gotoc::GotocCtx;
+use crate::codegen_cprover_gotoc::codegen::cache::cache_entry;
 use crate::codegen_cprover_gotoc::context::SpanWrapper;
 use cbmc::goto_program::Location;
 use lazy_static::lazy_static;
@@ -38,16 +39,17 @@ impl GotocCtx<'_, '_> {
     }
 
     pub fn codegen_span_stable(&self, sp: SpanStable) -> Location {
-        // let start = std::time::Instant::now();
-        if let Some(cached_loc) = self.span_cache.borrow_mut().get(&SpanWrapper(sp)) {
-            let mut res = *cached_loc;
-
-            // have to set the current function too (this is different even with the same span)
-            res.try_set_function(self.current_fn.as_ref().map(|x| x.readable_name().to_string()))
+        cache_entry::<Location>(SpanWrapper(sp))
+            .tweak(|res| {
+                res.try_set_function(
+                    self.current_fn.as_ref().map(|x| x.readable_name().to_string()),
+                )
                 .unwrap();
-            // println!("instead cloned in {:?}", start.elapsed());
-            return res;
-        }
+            })
+            .or_insert_with(|| self.codegen_span_stable_inner(sp))
+    }
+
+    pub fn codegen_span_stable_inner(&self, sp: SpanStable) -> Location {
         // Attribute to mark functions as where automatic pointer checks should not be generated.
         let should_skip_ptr_checks_attr = vec![
             rustc_span::symbol::Symbol::intern("kanitool"),
