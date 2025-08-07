@@ -123,9 +123,10 @@ impl GotocCodegenBackend {
 
         // Re-collect reachable items after global transformations were applied. This is necessary
         // since global pass could add extra calls to instrumentation.
+        let mut cache = Default::default();
         if any_pass_modified {
             (reachability.reachable, _) = with_timer(
-                || collect_reachable_items(tcx, transformer, &reachability.starting),
+                || collect_reachable_items(tcx, transformer, &mut cache, &reachability.starting),
                 "codegen reachability analysis (second pass)",
             );
         }
@@ -290,6 +291,7 @@ fn reachability_analysis_fn_for_harness<'a>(
 ) -> impl Fn(&'a Harness) -> (HarnessWithReachable<'a>, Rc<RefCell<BodyTransformation>>) {
     let shared_unit_transformer =
         Rc::new(RefCell::new(BodyTransformation::new(queries, tcx, unit)));
+    let collection_cache = Rc::new(RefCell::new(Default::default()));
 
     move |harness: &'a Harness| {
         let my_ref_to_transformer = shared_unit_transformer.clone();
@@ -300,6 +302,7 @@ fn reachability_analysis_fn_for_harness<'a>(
                 ReachabilityInfo::generate_from(
                     tcx,
                     &mut shared_unit_transformer.borrow_mut(),
+                    &mut collection_cache.borrow_mut(),
                     vec![MonoItem::Fn(*harness)],
                 )
             },
@@ -496,9 +499,10 @@ impl CodegenBackend for GotocCodegenBackend {
                     .map(MonoItem::Fn)
                     .collect::<Vec<_>>();
                     let model_path = base_filename.with_extension(ArtifactType::SymTabGoto);
+                    let mut cache = Default::default();
                     let (gcx, items, contract_info) = self.codegen_items(
                         tcx,
-                        ReachabilityInfo::generate_from(tcx, &mut transformer, local_reachable),
+                        ReachabilityInfo::generate_from(tcx, &mut transformer, &mut cache, local_reachable),
                         &model_path,
                         &results.machine_model,
                         Default::default(),

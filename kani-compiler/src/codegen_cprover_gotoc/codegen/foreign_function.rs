@@ -9,6 +9,7 @@
 //! linking and usability unless unstable C-FFI support is enabled.
 use std::collections::HashSet;
 
+use crate::codegen_cprover_gotoc::codegen::contract::CachedInstance;
 use crate::codegen_cprover_gotoc::GotocCtx;
 use crate::codegen_cprover_gotoc::codegen::PropertyClass;
 use crate::unwrap_or_return_codegen_unimplemented_stmt;
@@ -48,11 +49,11 @@ impl GotocCtx<'_, '_> {
     ///
     /// For other foreign items, we declare a shim and add to the list of foreign shims to be
     /// handled later.
-    pub fn codegen_foreign_fn(&mut self, instance: Instance) -> &Symbol {
+    pub fn codegen_foreign_fn(&mut self, instance: CachedInstance) -> &Symbol {
         debug!(?instance, "codegen_foreign_function");
-        let trimmed_fn_name = instance.trimmed_name().intern();
-        let mangled_fn_name = instance.mangled_name().intern();
-        let loc = self.codegen_span_stable(instance.def.span());
+        let trimmed_fn_name = instance.inner.trimmed_name().intern();
+        let mangled_fn_name = instance.inner.mangled_name().intern();
+        let loc = self.codegen_span_stable(instance.inner.def.span());
         if self.symbol_table.contains(mangled_fn_name) {
             // Symbol has been added (a built-in CBMC function)
             self.symbol_table.lookup(mangled_fn_name).unwrap()
@@ -64,7 +65,7 @@ impl GotocCtx<'_, '_> {
             // We use the trimmed name to ensure that it matches the function names in kani_lib.c
             self.ensure(trimmed_fn_name, |gcx, _| {
                 let typ = gcx.codegen_ffi_type(instance);
-                Symbol::function(trimmed_fn_name, typ, None, instance.name(), loc)
+                Symbol::function(trimmed_fn_name, typ, None, instance.inner.name(), loc)
                     .with_is_extern(true)
             })
         } else if self.is_cffi_enabled() && instance.fn_abi().unwrap().conv == CallConvention::C {
@@ -73,7 +74,7 @@ impl GotocCtx<'_, '_> {
             // https://github.com/model-checking/kani/issues/2426
             self.ensure(mangled_fn_name, |gcx, _| {
                 let typ = gcx.codegen_ffi_type(instance);
-                Symbol::function(mangled_fn_name, typ, None, instance.name(), loc)
+                Symbol::function(mangled_fn_name, typ, None, instance.inner.name(), loc)
                     .with_is_extern(true)
             })
         } else {
@@ -86,7 +87,7 @@ impl GotocCtx<'_, '_> {
                     &shim_name,
                     typ,
                     Some(gcx.codegen_ffi_shim(shim_name.as_str().into(), instance)),
-                    instance.name(),
+                    instance.inner.name(),
                     loc,
                 )
             })
@@ -134,7 +135,7 @@ impl GotocCtx<'_, '_> {
     }
 
     /// Generate code for a foreign function shim.
-    fn codegen_ffi_shim(&mut self, shim_name: InternedString, instance: Instance) -> Stmt {
+    fn codegen_ffi_shim(&mut self, shim_name: InternedString, instance: CachedInstance) -> Stmt {
         debug!(?shim_name, ?instance, sym=?self.symbol_table.lookup(shim_name), "generate_foreign_shim");
 
         let loc = self.codegen_span_stable(instance.def.span());
@@ -143,7 +144,7 @@ impl GotocCtx<'_, '_> {
     }
 
     /// Generate type for the given foreign instance.
-    fn codegen_ffi_type(&mut self, instance: Instance) -> Type {
+    fn codegen_ffi_type(&mut self, instance: CachedInstance) -> Type {
         let fn_name = instance.mangled_name();
         let fn_abi = instance.fn_abi().unwrap();
         let loc = self.codegen_span_stable(instance.def.span());

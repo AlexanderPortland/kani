@@ -83,6 +83,13 @@ impl GotocCtx<'_, '_> {
     /// statements and [Terminator]s, which can exclusively appear at the end of a basic block.
     ///
     /// See [GotocCtx::codegen_terminator] for those.
+    // pub fn codegen_statement(&mut self, stmt: &Statement) -> Stmt {
+    //     // println!("codegen stmt {stmt:?}");
+    //     if let Some(cached_stmt) = self.cache.borrow_mut().stmts.get(stmt) {
+
+    //     }
+    // }
+
     pub fn codegen_statement(&mut self, stmt: &Statement) -> Stmt {
         let _trace_span = debug_span!("CodegenStatement", statement = ?stmt).entered();
         debug!(?stmt, kind=?stmt.kind, "handling_statement");
@@ -728,8 +735,9 @@ impl GotocCtx<'_, '_> {
                 let mut fargs = if args.is_empty()
                     || fn_def.fn_sig().unwrap().value.abi != Abi::RustCall
                 {
-                    if instance.def.name() == "kani::internal::kani_forall"
-                        || (instance.def.name() == "kani::internal::kani_exists")
+                    let name = instance.def.name();
+                    if name == "kani::internal::kani_forall"
+                        || name == "kani::internal::kani_exists"
                     {
                         self.codegen_funcall_args_for_quantifiers(&fn_abi, args)
                     } else {

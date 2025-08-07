@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 // Copyright Kani Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 use crate::codegen_cprover_gotoc::{GotocCtx, codegen::ty_stable::pointee_type_stable};
@@ -11,6 +13,43 @@ use rustc_public::mir::mono::{Instance, MonoItem};
 use rustc_public::mir::{Local, VarDebugInfoContents};
 use rustc_public::rustc_internal;
 use rustc_public::ty::{FnDef, RigidTy, TyKind};
+
+#[derive(Debug)]
+pub struct CachedInstance {
+    pub inner: Instance,
+    fn_abi: Option<Result<rustc_public::abi::FnAbi, rustc_public::Error>>,
+    def_name: Option<String>,
+}
+
+impl From<Instance> for CachedInstance {
+    fn from(value: Instance) -> Self {
+        CachedInstance { inner: value, fn_abi: None, def_name: None, }
+    }
+}
+
+impl CachedInstance {
+    pub fn def_name(&mut self) -> String {
+        match &mut self.def_name {
+            Some(cached) => cached.to_string(),
+            not_cached => {
+                let name = self.inner.def.name();
+                *not_cached = Some(name.clone());
+                name
+            }
+        }
+    }
+
+    pub fn fn_abi(&self) -> Result<rustc_public::abi::FnAbi, rustc_public::Error> {
+        match &mut self.fn_abi {
+            Some(cached) => cached.clone(),
+            not_cached => {
+                let abi = self.inner.fn_abi();
+                *not_cached = Some(abi.clone());
+                abi
+            }
+        }
+    }
+}
 
 impl GotocCtx<'_, '_> {
     /// Given the `proof_for_contract` target `function_under_contract` and the reachable `items`,
@@ -119,7 +158,7 @@ impl GotocCtx<'_, '_> {
     fn codegen_modifies_contract(
         &mut self,
         goto_annotated_fn_name: &str,
-        modifies: Instance,
+        modifies: CachedInstance,
         loc: Location,
     ) -> FunctionContract {
         let goto_annotated_fn_typ = self

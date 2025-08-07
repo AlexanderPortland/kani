@@ -23,6 +23,7 @@ use rustc_middle::ty::{List, TypeFoldable};
 use rustc_public::abi::{ArgAbi, FnAbi, PassMode};
 use rustc_public::mir::Body;
 use rustc_public::mir::mono::Instance as InstanceStable;
+use crate::codegen_cprover_gotoc::codegen::contract::CachedInstance as CachedInstanceStable;
 use rustc_public::rustc_internal;
 use rustc_public::ty::{
     Binder, DynKind, ExistentialPredicate, ExistentialProjection, Region, RegionKind, RigidTy,
@@ -1111,7 +1112,7 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
     /// `S = P | Pin<P>`
     ///
     /// See <https://doc.rust-lang.org/reference/items/traits.html#object-safety> for more details.
-    fn codegen_dynamic_function_sig(&mut self, instance: InstanceStable) -> Type {
+    fn codegen_dynamic_function_sig(&mut self, instance: CachedInstance) -> Type {
         let mut is_first = true;
         let fn_abi = instance.fn_abi().unwrap();
         let args = self.codegen_args(instance, &fn_abi);

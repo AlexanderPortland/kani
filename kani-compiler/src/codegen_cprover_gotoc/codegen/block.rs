@@ -18,7 +18,8 @@ impl GotocCtx<'_, '_> {
     /// This function does not return a value, but mutates state with
     /// `self.current_fn_mut().push_onto_block(...)`
     pub fn codegen_block(&mut self, bb: BasicBlockIdx, bbd: &BasicBlock) {
-        debug!(?bb, "codegen_block");
+        // debug!(?bb, "codegen_block");
+        // println!("codegen basic block {bbd:?}");
         let label = bb_label(bb);
         // the first statement should be labelled. if there is no statements, then the
         // terminator should be labelled.

@@ -40,7 +40,7 @@ impl GotocCtx<'_, '_> {
                 name.clone(),
                 base_name,
                 var_type,
-                self.codegen_span_stable(ldata.span),
+                loc.clone(),
             )
             .with_is_hidden(!self.is_user_variable(&lc))
             .with_is_parameter((lc > 0 && lc <= num_args) && !self.is_zst_stable(ldata.ty));

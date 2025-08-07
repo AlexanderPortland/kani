@@ -16,6 +16,7 @@
 //!
 //! Note that this is a copy of `reachability.rs` that uses rustc_public but the public APIs are still
 //! kept with internal APIs.
+use fxhash::FxHashMap;
 use tracing::{debug, debug_span, trace};
 
 use rustc_data_structures::fingerprint::Fingerprint;
@@ -49,13 +50,14 @@ use crate::kani_middle::transform::BodyTransformation;
 pub fn collect_reachable_items(
     tcx: TyCtxt,
     transformer: &mut BodyTransformation,
+    collection_cache: &mut CollectionCache,
     starting_points: &[MonoItem],
 ) -> (Vec<MonoItem>, CallGraph) {
     // For each harness, collect items using the same collector.
     // I.e.: This will return any item that is reachable from one or more of the starting points.
     let mut collector = MonoItemsCollector::new(tcx, transformer);
     for item in starting_points {
-        collector.collect(item.clone());
+        collector.collect(item.clone(), collection_cache);
     }
 
     #[cfg(debug_assertions)]
@@ -85,10 +87,11 @@ impl ReachabilityInfo {
     pub fn generate_from(
         tcx: TyCtxt,
         transformer: &mut BodyTransformation,
+        cache: &mut CollectionCache,
         starting_items: Vec<MonoItem>,
     ) -> Self {
         let (reachable_items, call_graph) =
-            collect_reachable_items(tcx, transformer, &starting_items);
+            collect_reachable_items(tcx, transformer, cache, &starting_items);
         ReachabilityInfo { starting: starting_items, reachable: reachable_items, call_graph }
     }
 }
@@ -133,6 +136,10 @@ struct CollectedItem {
     reason: CollectionReason,
 }
 
+#[derive(Default)]
+pub struct CollectionCache(FxHashMap<MonoItem, Vec<CollectedItem>>);
+// type CollectionCache = FxHashMap<MonoItem, Vec<CollectedItem>>;
+
 struct MonoItemsCollector<'tcx, 'a> {
     /// The compiler context.
     tcx: TyCtxt<'tcx>,
@@ -158,30 +165,38 @@ impl<'tcx, 'a> MonoItemsCollector<'tcx, 'a> {
     }
 
     /// Collects all reachable items starting from the given root.
-    pub fn collect(&mut self, root: MonoItem) {
+    pub fn collect(&mut self, root: MonoItem, cache: &mut CollectionCache) {
         debug!(?root, "collect");
         self.queue.push(root);
-        self.reachable_items();
+        self.reachable_items(cache);
     }
 
     /// Traverses the call graph starting from the given root. For every function, we visit all
     /// instruction looking for the items that should be included in the compilation.
-    fn reachable_items(&mut self) {
+    fn reachable_items(&mut self, cache: &mut CollectionCache) {
         while let Some(to_visit) = self.queue.pop() {
+            // println!("visiting this jawn {to_visit:?}");
             if !self.collected.contains(&to_visit) {
+                // try moving this below to avoid a clone
                 self.collected.insert(to_visit.clone());
-                let next_items = match &to_visit {
-                    MonoItem::Fn(instance) => self.visit_fn(*instance),
-                    MonoItem::Static(static_def) => self.visit_static(*static_def),
-                    MonoItem::GlobalAsm(_) => {
-                        self.visit_asm(&to_visit);
-                        vec![]
-                    }
+                let next_items = {
+                    let a = cache.0.entry(to_visit.clone()).or_insert_with_key(|to_visit|{
+                        // println!("cache miss on {:?}", to_visit);
+                        match to_visit {
+                            MonoItem::Fn(instance) => self.visit_fn(*instance),
+                            MonoItem::Static(static_def) => self.visit_static(*static_def),
+                            MonoItem::GlobalAsm(_) => {
+                                self.visit_asm(to_visit);
+                                vec![]
+                            }
+                        }
+                    });
+                    &*a
                 };
-                self.call_graph.add_edges(to_visit, &next_items);
+                self.call_graph.add_edges(&to_visit, next_items);
 
                 self.queue.extend(next_items.into_iter().filter_map(
-                    |CollectedItem { item, .. }| (!self.collected.contains(&item)).then_some(item),
+                    |CollectedItem { item, .. }| (!self.collected.contains(&item)).then(|| item.clone()),
                 ));
             }
         }
@@ -591,7 +606,7 @@ impl CallGraph {
     }
 
     /// Add multiple new edges for the "from" node.
-    fn add_edges(&mut self, from: MonoItem, to: &[CollectedItem]) {
+    fn add_edges(&mut self, from: &MonoItem, to: &[CollectedItem]) {
         self.add_node(from.clone());
         for CollectedItem { item, reason } in to {
             self.add_edge(from.clone(), item.clone(), *reason);

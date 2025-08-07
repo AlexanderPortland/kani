@@ -35,7 +35,7 @@ use rustc_middle::ty::layout::{
     LayoutOfHelpers, TyAndLayout,
 };
 use rustc_middle::ty::{self, Ty, TyCtxt};
-use rustc_public::mir::Body;
+use rustc_public::mir::{BasicBlockIdx, Body};
 use rustc_public::mir::mono::Instance;
 use rustc_public::ty::Allocation;
 use rustc_span::Span;
@@ -82,6 +82,7 @@ pub struct CodegenCache {
     pub spans: FxHashMap<SpanWrapper, Location>,
     pub types: FxHashMap<rustc_public::ty::Ty, Type>,
     pub rvalues: FxHashMap<SpanWrapper, Location>,
+    pub stmts: FxHashMap<rustc_public::mir::Statement, cbmc::goto_program::Stmt>,
 }
 
 pub struct GotocCtx<'tcx, 'r> {
