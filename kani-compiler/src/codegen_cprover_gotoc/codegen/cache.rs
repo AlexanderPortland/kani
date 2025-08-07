@@ -87,6 +87,8 @@ generate_cache!(CodegenCache --
     @global [spans] rustc_public::ty::Span => cbmc::goto_program::Location
 );
 
+// TODO: add rvalues for sure...
+
 pub struct FinalEntry<T: CodegenCacheEl>(Option<T>, T::Key);
 
 pub fn cache_entry<E: CodegenCacheEl + Clone>(key: E::Key) -> FinalEntry<E> {

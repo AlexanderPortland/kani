@@ -198,10 +198,14 @@ impl TryFrom<FnDef> for KaniFunction {
 }
 
 impl TryFrom<Instance> for KaniFunction {
-    type Error = ();
+    type Error = Option<String>;
 
     fn try_from(instance: Instance) -> Result<Self, Self::Error> {
-        let value = attributes::fn_marker(instance.def).ok_or(())?;
+        let value = match attributes::fn_marker(instance.def) {
+            None => return Err(None),
+            Some(value) => value,
+        };
+
         if let Ok(intrinsic) = KaniIntrinsic::from_str(&value) {
             Ok(intrinsic.into())
         } else if let Ok(model) = KaniModel::from_str(&value) {
@@ -209,7 +213,7 @@ impl TryFrom<Instance> for KaniFunction {
         } else if let Ok(hook) = KaniHook::from_str(&value) {
             Ok(hook.into())
         } else {
-            Err(())
+            Err(Some(value))
         }
     }
 }
