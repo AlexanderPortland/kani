@@ -86,8 +86,10 @@ macro_rules! clear_cache {
 
 generate_cache!(CodegenCache --
             [types] rustc_public::ty::Ty => cbmc::goto_program::Type,
-    @global [spans] SpanWrapper => cbmc::goto_program::Location
+    @global [spans] SpanWrapper          => cbmc::goto_program::Location
 );
+
+// TODO: add rvalues for sure...
 
 pub struct FinalEntry<T: CodegenCacheEl>(Option<T>, T::Key);
 
