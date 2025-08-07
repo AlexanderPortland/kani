@@ -7,6 +7,7 @@
 //! `typ.rs`.
 
 use crate::codegen_cprover_gotoc::GotocCtx;
+use crate::codegen_cprover_gotoc::codegen::cache::cache_entry;
 use crate::kani_middle::abi::LayoutOf;
 use cbmc::goto_program::Type;
 use rustc_middle::ty::layout::{LayoutOf as _, TyAndLayout};
@@ -20,8 +21,15 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
         place.ty(self.current_fn().locals()).unwrap()
     }
 
+    // pub fn codegen_ty_stable(&mut self, ty: Ty) -> Type {
+    //     cache_entry::<Type>(ty).or_insert_with(||{
+    //         self.codegen_ty_stable_inner(ty)
+    //     })
+    // }
+
     pub fn codegen_ty_stable(&mut self, ty: Ty) -> Type {
-        self.codegen_ty(rustc_internal::internal(self.tcx, ty))
+        cache_entry::<Type>(ty)
+            .or_insert_with(|| self.codegen_ty(rustc_internal::internal(self.tcx, ty)))
     }
 
     pub fn codegen_ty_ref_stable(&mut self, ty: Ty) -> Type {

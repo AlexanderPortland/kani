@@ -16,9 +16,9 @@
 //! this structure as input.
 use super::current_fn::CurrentFnCtx;
 use super::vtable_ctx::VtableCtx;
-use crate::codegen_cprover_gotoc::UnsupportedConstructs;
 use crate::codegen_cprover_gotoc::overrides::{GotocHooks, fn_hooks};
 use crate::codegen_cprover_gotoc::utils::full_crate_name;
+use crate::codegen_cprover_gotoc::{UnsupportedConstructs, clear_codegen_cache};
 use crate::kani_middle::transform::BodyTransformation;
 use crate::kani_queries::QueryDb;
 use cbmc::goto_program::{
@@ -41,7 +41,6 @@ use rustc_public::ty::Allocation;
 use rustc_span::Span;
 use rustc_span::source_map::respan;
 use rustc_target::callconv::FnAbi;
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Debug;
 
@@ -61,19 +60,6 @@ pub struct MinimalGotocCtx {
     pub has_loop_contracts: bool,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct OurSpan(usize);
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct SpanWrapper(pub rustc_public::ty::Span);
-
-impl std::hash::Hash for SpanWrapper {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        let our_span: OurSpan = unsafe { std::mem::transmute(self.0) };
-        our_span.0.hash(state);
-    }
-}
-
 pub struct GotocCtx<'tcx, 'r> {
     /// the typing context
     pub tcx: TyCtxt<'tcx>,
@@ -89,7 +75,6 @@ pub struct GotocCtx<'tcx, 'r> {
     pub global_var_count: u64,
     /// map a global allocation to a name in the symbol table
     pub alloc_map: FxHashMap<Allocation, String>,
-    pub span_cache: RefCell<FxHashMap<SpanWrapper, Location>>,
     /// map (trait, method) pairs to possible implementations
     pub vtable_ctx: VtableCtx,
     pub current_fn: Option<CurrentFnCtx<'tcx>>,
@@ -121,6 +106,7 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
         machine_model: &MachineModel,
         transformer: &'r mut BodyTransformation,
     ) -> GotocCtx<'tcx, 'r> {
+        clear_codegen_cache();
         let fhks = fn_hooks();
         let symbol_table = SymbolTable::new(machine_model.clone());
         let emit_vtable_restrictions = queries.args().emit_vtable_restrictions;
@@ -134,7 +120,6 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
             alloc_map: FxHashMap::default(),
             vtable_ctx: VtableCtx::new(emit_vtable_restrictions),
             current_fn: None,
-            span_cache: RefCell::new(FxHashMap::default()),
             type_map: FxHashMap::default(),
             str_literals: FxHashMap::default(),
             global_checks_count: 0,
