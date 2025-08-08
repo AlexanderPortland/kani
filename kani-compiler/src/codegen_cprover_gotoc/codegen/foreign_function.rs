@@ -11,6 +11,7 @@ use std::collections::HashSet;
 
 use crate::codegen_cprover_gotoc::GotocCtx;
 use crate::codegen_cprover_gotoc::codegen::PropertyClass;
+use crate::codegen_cprover_gotoc::codegen::cache::cache_entry;
 use crate::unwrap_or_return_codegen_unimplemented_stmt;
 use cbmc::goto_program::{Expr, Location, Stmt, Symbol, Type};
 use cbmc::{InternString, InternedString};
@@ -145,7 +146,7 @@ impl GotocCtx<'_, '_> {
     /// Generate type for the given foreign instance.
     fn codegen_ffi_type(&mut self, instance: Instance) -> Type {
         let fn_name = instance.mangled_name();
-        let fn_abi = instance.fn_abi().unwrap();
+        let fn_abi = cache_entry(instance).or_insert_with(|| instance.fn_abi().unwrap());
         let loc = self.codegen_span_stable(instance.def.span());
         let params = fn_abi
             .args
