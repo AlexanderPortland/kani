@@ -1,6 +1,7 @@
 // Copyright Kani Contributors
 // SPDX-License-Identifier: Apache-2.0 OR MIT
 use crate::codegen_cprover_gotoc::GotocCtx;
+use crate::codegen_cprover_gotoc::codegen::cache::cache_entry;
 use cbmc::goto_program::{DatatypeComponent, Expr, Location, Parameter, Symbol, SymbolTable, Type};
 use cbmc::utils::aggr_tag;
 use cbmc::{InternString, InternedString};
@@ -1113,7 +1114,7 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
     /// See <https://doc.rust-lang.org/reference/items/traits.html#object-safety> for more details.
     fn codegen_dynamic_function_sig(&mut self, instance: InstanceStable) -> Type {
         let mut is_first = true;
-        let fn_abi = instance.fn_abi().unwrap();
+        let fn_abi = cache_entry(instance).or_insert_with(|| instance.fn_abi().unwrap());
         let args = self.codegen_args(instance, &fn_abi);
         let params = args
             .map(|(_, arg_abi)| {
@@ -1566,7 +1567,7 @@ impl<'tcx, 'r> GotocCtx<'tcx, 'r> {
 
     /// the function type of the current instance
     pub fn fn_typ(&mut self, instance: InstanceStable, body: &Body) -> Type {
-        let fn_abi = instance.fn_abi().unwrap();
+        let fn_abi = cache_entry(instance).or_insert_with(|| instance.fn_abi().unwrap());
         let params: Vec<Parameter> = self
             .codegen_args(instance, &fn_abi)
             .filter_map(|(i, arg_abi)| {

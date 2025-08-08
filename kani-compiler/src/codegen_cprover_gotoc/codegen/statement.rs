@@ -3,6 +3,7 @@
 use super::typ::FN_RETURN_VOID_VAR_NAME;
 use super::typ::TypeExt;
 use super::{PropertyClass, bb_label};
+use crate::codegen_cprover_gotoc::codegen::cache::cache_entry;
 use crate::codegen_cprover_gotoc::codegen::function::rustc_public_bridge::region_from_coverage_opaque;
 use crate::codegen_cprover_gotoc::{GotocCtx, VtableCtx};
 use crate::unwrap_or_return_codegen_unimplemented_stmt;
@@ -282,7 +283,9 @@ impl GotocCtx<'_, '_> {
                 "https://github.com/model-checking/kani/issues/692",
             ),
             TerminatorKind::Return => {
-                let rty = self.current_fn().instance_stable().fn_abi().unwrap().ret.ty;
+                let instance = self.current_fn().instance_stable();
+                let fn_abi = cache_entry(instance).or_insert_with(|| instance.fn_abi().unwrap());
+                let rty = fn_abi.ret.ty;
                 if rty.kind().is_unit() {
                     self.codegen_ret_unit(loc)
                 } else {
@@ -724,12 +727,15 @@ impl GotocCtx<'_, '_> {
         match fn_ty.kind() {
             fn_def @ TyKind::RigidTy(RigidTy::FnDef(..)) => {
                 let instance = instance_opt.unwrap();
-                let fn_abi = instance.fn_abi().unwrap();
+                let fn_abi =
+                    cache_entry::<FnAbi>(instance).or_insert_with(|| instance.fn_abi().unwrap());
+
                 let mut fargs = if args.is_empty()
                     || fn_def.fn_sig().unwrap().value.abi != Abi::RustCall
                 {
-                    if instance.def.name() == "kani::internal::kani_forall"
-                        || (instance.def.name() == "kani::internal::kani_exists")
+                    let def_name = instance.def.name();
+                    if def_name == "kani::internal::kani_forall"
+                        || (def_name == "kani::internal::kani_exists")
                     {
                         self.codegen_funcall_args_for_quantifiers(&fn_abi, args)
                     } else {

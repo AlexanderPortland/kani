@@ -22,6 +22,8 @@ use syn::parse::Parser;
 use syn::punctuated::Punctuated;
 use syn::{Expr, ExprLit, Lit, PathSegment, TypePath};
 
+use crate::codegen_cprover_gotoc::cache_entry;
+
 use super::resolve::{FnResolution, ResolveError, resolve_fn, resolve_fn_path};
 use tracing::{debug, trace};
 
@@ -680,7 +682,7 @@ impl<'tcx> KaniAttributes<'tcx> {
             );
         } else {
             let instance = rustc_internal::stable(Instance::mono(tcx, self.item));
-            let fn_abi = instance.fn_abi().unwrap();
+            let fn_abi = cache_entry(instance).or_insert_with(|| instance.fn_abi().unwrap());
             if !fn_abi.args.is_empty() {
                 tcx.dcx().span_err(span, "functions used as harnesses cannot have any arguments");
             }
