@@ -24,7 +24,7 @@ use kani_metadata::{
     HarnessMetadata, KaniMetadata, find_proof_harnesses,
 };
 use regex::RegexSet;
-use rustc_hir::def_id::DefId;
+use rustc_hir::def_id::{DefId, LOCAL_CRATE};
 use rustc_middle::ty::TyCtxt;
 use rustc_public::mir::mono::Instance;
 use rustc_public::rustc_internal;
@@ -214,7 +214,7 @@ fn group_by_stubs(
             .iter()
             .map(|(k, v)| (tcx.def_path_hash(*k), tcx.def_path_hash(*v)))
             .collect::<BTreeMap<_, _>>();
-        let key = (contracts, stub_map);
+        let key: (BTreeSet<ContractUsage>, BTreeMap<rustc_hir::def_id::DefPathHash, rustc_hir::def_id::DefPathHash>) = (contracts, stub_map);
         if let Some(unit) = per_stubs.get_mut(&key) {
             unit.harnesses.push(*harness);
         } else {
@@ -226,6 +226,7 @@ fn group_by_stubs(
             per_stubs.insert(key, CodegenUnit { stubs, harnesses: vec![*harness] });
         }
     }
+    println!("per stubs for {:?} is {:?}", tcx.crate_name(LOCAL_CRATE), per_stubs);
     per_stubs.into_values().collect()
 }
 

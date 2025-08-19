@@ -287,26 +287,21 @@ fn reachability_analysis_fn_for_harness<'a>(
     unit: &CodegenUnit,
     queries: &QueryDb,
     tcx: TyCtxt,
-) -> impl Fn(&'a Harness) -> (HarnessWithReachable<'a>, Rc<RefCell<BodyTransformation>>) {
-    let shared_unit_transformer =
-        Rc::new(RefCell::new(BodyTransformation::new(queries, tcx, unit)));
-
+    shared_unit_transformer: &mut BodyTransformation,
+) -> impl FnMut(&'a Harness) -> HarnessWithReachable<'a> {
     move |harness: &'a Harness| {
-        let my_ref_to_transformer = shared_unit_transformer.clone();
-        // let mut transformer = my_ref_to_transformer.borrow_mut();
-
         let info = with_timer(
             || {
                 ReachabilityInfo::generate_from(
                     tcx,
-                    &mut shared_unit_transformer.borrow_mut(),
+                    shared_unit_transformer,
                     vec![MonoItem::Fn(*harness)],
                 )
             },
             "codegen reachability analysis",
         );
 
-        ((harness, info), my_ref_to_transformer)
+        (harness, info)
     }
 }
 
@@ -430,14 +425,19 @@ impl CodegenBackend for GotocCodegenBackend {
                     // iterator has the reachability result for each harness, but also the transformer that harness used so
                     // we can reuse it during codegen.
 
+                    println!("crate {:?} has {:?} codegen units", tcx.crate_name(LOCAL_CRATE), units.iter().count());
+
                     let ordered_harnesses = units.iter().map(|unit| {
-                        unit.harnesses
+                        let mut transformer = BodyTransformation::new(&queries, tcx, unit);
+                        
+                        let harnesses = unit.harnesses
                             .iter()
-                            .map(reachability_analysis_fn_for_harness(unit, &queries, tcx))
-                            .collect::<Vec<_>>()
+                            .map(reachability_analysis_fn_for_harness(unit, &queries, tcx, &mut transformer))
+                            .collect::<Vec<_>>();
+                        // assert_eq!(harnesses.len(), 1);
+                        (harnesses, transformer)
                     })
-                    .apply_ordering_heuristic::<crate::kani_middle::codegen_order::MostReachableItems>()
-                    .flatten();
+                    .apply_ordering_heuristic::<crate::kani_middle::codegen_order::MostReachableItems>();
 
                     // This runs reachability analysis before global passes are applied in `codegen_items`.
                     //
@@ -450,7 +450,8 @@ impl CodegenBackend for GotocCodegenBackend {
                     let template_passes = GlobalPasses::new(&queries, tcx);
 
                     // Then, actually codegen those reachable items for each.
-                    for ((harness, reachability), transformer) in ordered_harnesses {
+                    for (ordered_harnesses_in_unit, mut transformer) in ordered_harnesses {
+                    for (harness, reachability) in ordered_harnesses_in_unit {
                         let model_path = units.harness_model_path(*harness).unwrap();
                         let is_automatic_harness = units.is_automatic_harness(harness);
                         let contract_metadata =
@@ -463,7 +464,7 @@ impl CodegenBackend for GotocCodegenBackend {
                             &results.machine_model,
                             contract_metadata,
                             template_passes.clone(),
-                            &mut transformer.borrow_mut(),
+                            &mut transformer,
                             &export_thread_pool,
                         );
                         if min_gcx.has_loop_contracts {
@@ -474,6 +475,7 @@ impl CodegenBackend for GotocCodegenBackend {
                             modifies_instances.push((*harness, assigns_contract));
                         }
                     }
+                }
                     units.store_modifies(&modifies_instances);
                     units.store_loop_contracts(&loop_contracts_instances);
                     units.write_metadata(&queries, tcx);

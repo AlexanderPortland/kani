@@ -10,7 +10,9 @@
 //!
 //! This module currently provides a simple [MostReachableItems] heuristic to combat that, but more
 //! complex heuristics might be able to improve on this or avoid other kinds of pitfalls.
-use crate::codegen_cprover_gotoc::HarnessWithReachable;
+use rustc_public::mir::mono::MonoItem;
+
+use crate::{codegen_cprover_gotoc::HarnessWithReachable, kani_middle::reachability::{CallGraph, CollectedNode, Node, ReachabilityInfo}};
 
 /// Orders harnesses within a [CodegenUnit](crate::kani_middle::codegen_units::CodegenUnit) based on
 /// **the raw number of items found during reachability analysis**, putting those with more first.
@@ -31,14 +33,17 @@ pub trait CodegenHeuristic {
     fn evaluate_harness(harness: &HarnessWithReachable) -> usize;
 }
 
-fn reorder_harnesses<'a, H: CodegenHeuristic, T>(
-    harnesses: &mut Vec<(HarnessWithReachable<'a>, T)>,
+fn reorder_harnesses<'a, H: CodegenHeuristic>(
+    harnesses: &mut Vec<HarnessWithReachable<'a>>,
 ) {
     // Sort is ascending by default, so `usize::MAX - ...` ensures higher rated harnesses come first.
     // We don't care about stability, and for cheap heuristic fns like the one for `MostReachableItems`,
     // caching isn't likely to make a difference.
-
-    harnesses.sort_unstable_by_key(|(harness, _)| usize::MAX - H::evaluate_harness(harness));
+    // for h in harnesses.iter() {
+    //     size_of_reach_info(&h.1);
+    // }
+    // println!("thread {:?} sorting {:?} harnesses in codegen unit", std::thread::current().id(), harnesses.len());
+    harnesses.sort_unstable_by_key(|harness| usize::MAX - H::evaluate_harness(harness));
 }
 
 /// Simple trait extender to allow us to call `.apply_...()` on the right kind of iterators.
@@ -50,16 +55,49 @@ pub trait HeuristicOrderable: Iterator {
 
 impl<'a, I, T> HeuristicOrderable for I
 where
-    I: Iterator<Item = Vec<(HarnessWithReachable<'a>, T)>>,
+    I: Iterator<Item = (Vec<HarnessWithReachable<'a>>, T)>,
 {
     /// Apply an codegen ordering heuristic to an iterator over codegen units.
     fn apply_ordering_heuristic<H: CodegenHeuristic>(self) -> impl Iterator<Item = I::Item> {
         // Reorder harnesses within each codegen unit according to `T`.
-        self.map(|mut harnesses| {
-            reorder_harnesses::<H, T>(&mut harnesses);
+        
+        let v = self.map(|mut harnesses| {
+            reorder_harnesses::<H>(&mut harnesses.0);
             harnesses
         })
-        .collect::<Vec<_>>()
-        .into_iter()
+        .collect::<Vec<_>>();
+// println!("thread {:?} applyied heuristic to {:?} units", std::thread::current().id(), v.len());
+        v.into_iter()
     }
+}
+
+fn size_of_reach_info(r: &ReachabilityInfo) -> usize {
+    let ReachabilityInfo { starting, reachable, call_graph } = r;
+
+    let mut total_bytes = 0;
+
+    total_bytes += starting.len() * size_of::<MonoItem>();
+    total_bytes += reachable.len() * size_of::<MonoItem>();
+
+    let mut call_graph_bytes = 0;
+
+    let CallGraph {
+        nodes, 
+        edges, 
+        back_edges} = call_graph;
+
+    call_graph_bytes += nodes.len() * size_of::<Node>();
+    for (k, v) in edges {
+        call_graph_bytes += size_of_val(k) + v.len() * size_of::<CollectedNode>();
+    }
+
+    for (k, v) in back_edges {
+        call_graph_bytes += size_of_val(k) + v.len() * size_of::<CollectedNode>();
+    }
+
+    total_bytes += call_graph_bytes;
+
+    println!("{call_graph_bytes:?} from callgraph, {total_bytes:?} total");
+
+    total_bytes
 }

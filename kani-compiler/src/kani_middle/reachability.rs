@@ -550,20 +550,20 @@ fn collect_alloc_items(tcx: TyCtxt, alloc_id: AllocId) -> Vec<MonoItem> {
 #[derive(Debug, Default)]
 pub struct CallGraph {
     /// Nodes of the graph.
-    nodes: HashSet<Node>,
+    pub nodes: HashSet<Node>,
     /// Edges of the graph.
-    edges: HashMap<Node, Vec<CollectedNode>>,
+    pub edges: HashMap<Node, Vec<CollectedNode>>,
     /// Since the graph is directed, we also store back edges.
-    back_edges: HashMap<Node, Vec<CollectedNode>>,
+    pub back_edges: HashMap<Node, Vec<CollectedNode>>,
 }
 
 /// Newtype around MonoItem.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-struct Node(pub MonoItem);
+pub struct Node(pub MonoItem);
 
 /// Newtype around CollectedItem.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-struct CollectedNode(pub CollectedItem);
+pub struct CollectedNode(pub CollectedItem);
 
 impl CallGraph {
     /// Add a new node into a graph.
