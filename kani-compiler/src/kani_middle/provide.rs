@@ -4,9 +4,13 @@
 //! to run during code generation. For example, this can be used to hook up
 //! custom MIR transformations.
 
+use std::sync::Arc;
+
 use crate::args::{Arguments, ReachabilityType};
 use crate::kani_middle::intrinsics::ModelIntrinsics;
+use crate::kani_middle::new_panic;
 use crate::kani_queries::QueryDb;
+use rustc_expand::base::{MacroExpanderFn, SyntaxExtensionKind};
 use rustc_hir::def_id::{DefId, LocalDefId};
 use rustc_middle::util::Providers;
 use rustc_middle::{mir::Body, ty::TyCtxt};
@@ -15,6 +19,23 @@ use rustc_middle::{mir::Body, ty::TyCtxt};
 /// a crate.
 pub fn provide(providers: &mut Providers, queries: &QueryDb) {
     let args = queries.args();
+    providers.hooks.after_register_builtin_macros =
+        |tcx: TyCtxt<'_>, resolver: &mut dyn rustc_expand::base::ResolverExpand| {
+            // panic!("overriding builtin");
+            resolver.override_builtin_macro(
+                rustc_span::symbol::sym::std_panic,
+                SyntaxExtensionKind::LegacyBang(Arc::new(
+                    new_panic::new_expand_panic as MacroExpanderFn,
+                )),
+            );
+
+            resolver.override_builtin_macro(
+                rustc_span::symbol::sym::core_panic,
+                SyntaxExtensionKind::LegacyBang(Arc::new(
+                    new_panic::new_expand_panic as MacroExpanderFn,
+                )),
+            );
+        };
     if should_override(args) {
         // Don't override queries if we are only compiling our dependencies.
         providers.optimized_mir = run_mir_passes;

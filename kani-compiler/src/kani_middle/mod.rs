@@ -29,6 +29,7 @@ pub mod coercion;
 mod intrinsics;
 pub mod kani_functions;
 pub mod metadata;
+pub(crate) mod new_panic;
 pub mod points_to;
 pub mod provide;
 pub mod reachability;
